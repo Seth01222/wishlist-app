@@ -1,19 +1,117 @@
 @import "tailwindcss";
 
+/* Class-based dark mode — toggled by adding .dark to <html> */
+@variant dark (&:where(.dark, .dark *));
+
+/* ─── Semantic tokens: Light ─────────────────────────────────── */
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
+  --canvas:  #f4f4f8;
+  --card:    #ffffff;
+  --raised:  #eeeef4;
+  --line:    #e2e2ea;
+  --ink:     #0f0f14;
+  --dim:     #60607a;
+  --ghost:   #9898b0;
+
+  /* Default accent: indigo */
+  --a50:  #eef2ff;
+  --a100: #e0e7ff;
+  --a200: #c7d2fe;
+  --a500: #6366f1;
+  --a600: #4f46e5;
+  --a700: #4338ca;
+  --a-on: #ffffff;  /* text color ON accent bg */
 }
 
+/* ─── Semantic tokens: Dark ──────────────────────────────────── */
+.dark {
+  --canvas: #0d0d11;
+  --card:   #17171d;
+  --raised: #202028;
+  --line:   #2c2c38;
+  --ink:    #eeeef8;
+  --dim:    #8888a8;
+  --ghost:  #4a4a62;
+
+  --a50:  rgba(99,102,241,.12);
+  --a100: rgba(99,102,241,.22);
+  --a200: rgba(99,102,241,.35);
+}
+
+/* ─── Accent: Rose ───────────────────────────────────────────── */
+[data-accent="rose"] {
+  --a50:  #fff1f2; --a100: #ffe4e6; --a200: #fecdd3;
+  --a500: #f43f5e; --a600: #e11d48; --a700: #be123c; --a-on: #ffffff;
+}
+.dark[data-accent="rose"] {
+  --a50: rgba(244,63,94,.12); --a100: rgba(244,63,94,.22); --a200: rgba(244,63,94,.35);
+}
+
+/* ─── Accent: Emerald ────────────────────────────────────────── */
+[data-accent="emerald"] {
+  --a50:  #ecfdf5; --a100: #d1fae5; --a200: #a7f3d0;
+  --a500: #10b981; --a600: #059669; --a700: #047857; --a-on: #ffffff;
+}
+.dark[data-accent="emerald"] {
+  --a50: rgba(16,185,129,.12); --a100: rgba(16,185,129,.22); --a200: rgba(16,185,129,.35);
+}
+
+/* ─── Accent: Amber ──────────────────────────────────────────── */
+[data-accent="amber"] {
+  --a50:  #fffbeb; --a100: #fef3c7; --a200: #fde68a;
+  --a500: #f59e0b; --a600: #d97706; --a700: #b45309; --a-on: #0f172a;
+}
+.dark[data-accent="amber"] {
+  --a50: rgba(245,158,11,.12); --a100: rgba(245,158,11,.22); --a200: rgba(245,158,11,.35);
+}
+
+/* ─── Accent: Violet ─────────────────────────────────────────── */
+[data-accent="violet"] {
+  --a50:  #f5f3ff; --a100: #ede9fe; --a200: #ddd6fe;
+  --a500: #8b5cf6; --a600: #7c3aed; --a700: #6d28d9; --a-on: #ffffff;
+}
+.dark[data-accent="violet"] {
+  --a50: rgba(139,92,246,.12); --a100: rgba(139,92,246,.22); --a200: rgba(139,92,246,.35);
+}
+
+/* ─── Accent: Sky ────────────────────────────────────────────── */
+[data-accent="sky"] {
+  --a50:  #f0f9ff; --a100: #e0f2fe; --a200: #bae6fd;
+  --a500: #0ea5e9; --a600: #0284c7; --a700: #0369a1; --a-on: #ffffff;
+}
+.dark[data-accent="sky"] {
+  --a50: rgba(14,165,233,.12); --a100: rgba(14,165,233,.22); --a200: rgba(14,165,233,.35);
+}
+
+/* ─── Tailwind color tokens ──────────────────────────────────── */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-canvas:       var(--canvas);
+  --color-card:         var(--card);
+  --color-raised:       var(--raised);
+  --color-line:         var(--line);
+  --color-ink:          var(--ink);
+  --color-dim:          var(--dim);
+  --color-ghost:        var(--ghost);
+  --color-accent:       var(--a500);
+  --color-accent-hover: var(--a600);
+  --color-accent-dark:  var(--a700);
+  --color-accent-light: var(--a50);
+  --color-accent-soft:  var(--a100);
+  --color-accent-mid:   var(--a200);
 }
 
+/* ─── Base ───────────────────────────────────────────────────── */
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background-color: var(--canvas);
+  color: var(--ink);
   font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+}
+
+/* Smooth color transitions when switching theme */
+*, *::before, *::after {
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.1s ease;
+}
+/* But NOT on interactive elements (feels laggy) */
+button, a, input, select, textarea {
+  transition: none;
 }

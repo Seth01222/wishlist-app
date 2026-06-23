@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
 type Wishlist = {
@@ -10,14 +9,17 @@ type Wishlist = {
   name: string
   description: string | null
   created_at: string
+  emoji: string | null
 }
 
+const EMOJIS = ['🛍️','🎮','👟','📱','🏠','🎁','📚','🎵','🌿','✈️','🍳','💄','⌚','🎨','🧘','🐾']
+
 export default function WishlistsClient({ initialWishlists }: { initialWishlists: Wishlist[] }) {
-  const router = useRouter()
   const [wishlists, setWishlists] = useState(initialWishlists)
   const [showForm, setShowForm] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [emoji, setEmoji] = useState('🛍️')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -28,9 +30,12 @@ export default function WishlistsClient({ initialWishlists }: { initialWishlists
     setError(null)
 
     const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setError('Not logged in.'); setLoading(false); return }
+
     const { data, error } = await supabase
       .from('wishlists')
-      .insert({ name: name.trim(), description: description.trim() || null })
+      .insert({ name: name.trim(), description: description.trim() || null, user_id: user.id, emoji })
       .select()
       .single()
 
@@ -39,10 +44,8 @@ export default function WishlistsClient({ initialWishlists }: { initialWishlists
       setLoading(false)
     } else {
       setWishlists([data, ...wishlists])
-      setName('')
-      setDescription('')
-      setShowForm(false)
-      setLoading(false)
+      setName(''); setDescription(''); setEmoji('🛍️')
+      setShowForm(false); setLoading(false)
     }
   }
 
@@ -54,68 +57,98 @@ export default function WishlistsClient({ initialWishlists }: { initialWishlists
 
   return (
     <div>
+      {/* Page header */}
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">My Wishlists</h1>
-          <p className="text-slate-500 text-sm mt-1">Organize the things you want</p>
+          <h1 className="text-2xl font-bold text-ink">My Wishlists</h1>
+          <p className="text-dim text-sm mt-1">
+            {wishlists.length === 0 ? 'Start by creating a list' : `${wishlists.length} list${wishlists.length !== 1 ? 's' : ''}`}
+          </p>
         </div>
         <button
           onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 text-white font-medium text-sm hover:bg-indigo-700 transition shadow-sm"
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition-colors"
+          style={{ background: 'var(--a600)', color: 'var(--a-on)' }}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
-          New List
+          New list
         </button>
       </div>
 
+      {/* Create form */}
       {showForm && (
-        <div className="mb-6 bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-          <h2 className="font-semibold text-slate-900 mb-4">Create a new list</h2>
+        <div className="mb-6 bg-card border border-line rounded-2xl p-6 shadow-sm">
+          <h2 className="font-semibold text-ink mb-4">Create a new list</h2>
           {error && (
-            <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>
+            <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">{error}</div>
           )}
           <form onSubmit={createWishlist} className="space-y-4">
+            {/* Emoji picker */}
             <div>
-              <label htmlFor="listName" className="block text-sm font-medium text-slate-700 mb-1.5">
-                List name <span className="text-red-500">*</span>
+              <label className="block text-sm font-medium text-ink mb-2">Pick an icon</label>
+              <div className="flex flex-wrap gap-2">
+                {EMOJIS.map(e => (
+                  <button
+                    key={e}
+                    type="button"
+                    onClick={() => setEmoji(e)}
+                    className={`w-9 h-9 text-lg rounded-lg transition-all ${
+                      emoji === e
+                        ? 'ring-2 scale-110'
+                        : 'bg-raised hover:bg-elevated'
+                    }`}
+                    style={emoji === e ? { ringColor: 'var(--a500)', background: 'var(--a100)' } : {}}
+                  >
+                    {e}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="listName" className="block text-sm font-medium text-ink mb-1.5">
+                List name <span className="text-red-400">*</span>
               </label>
               <input
                 id="listName"
                 type="text"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={e => setName(e.target.value)}
                 required
-                placeholder="e.g. Birthday wishlist, Home office gear…"
-                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+                placeholder="e.g. Birthday wishlist, Gaming gear…"
+                className="w-full px-3.5 py-2.5 rounded-lg border border-line bg-raised text-ink placeholder:text-ghost focus:outline-none focus:ring-2 focus:border-transparent transition-colors"
+                style={{ '--tw-ring-color': 'var(--a500)' } as React.CSSProperties}
               />
             </div>
             <div>
-              <label htmlFor="listDesc" className="block text-sm font-medium text-slate-700 mb-1.5">
-                Description <span className="text-slate-400 font-normal">(optional)</span>
+              <label htmlFor="listDesc" className="block text-sm font-medium text-ink mb-1.5">
+                Description <span className="text-ghost font-normal">(optional)</span>
               </label>
               <input
                 id="listDesc"
                 type="text"
                 value={description}
-                onChange={(e) => setDescription(e.target.value)}
+                onChange={e => setDescription(e.target.value)}
                 placeholder="What is this list for?"
-                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+                className="w-full px-3.5 py-2.5 rounded-lg border border-line bg-raised text-ink placeholder:text-ghost focus:outline-none focus:ring-2 focus:border-transparent transition-colors"
+                style={{ '--tw-ring-color': 'var(--a500)' } as React.CSSProperties}
               />
             </div>
             <div className="flex gap-3 justify-end">
               <button
                 type="button"
                 onClick={() => { setShowForm(false); setError(null) }}
-                className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition"
+                className="px-4 py-2 text-sm font-medium text-dim hover:text-ink rounded-lg hover:bg-raised transition-colors"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={loading}
-                className="px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 transition"
+                className="px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-40 transition-colors"
+                style={{ background: 'var(--a600)', color: 'var(--a-on)' }}
               >
                 {loading ? 'Creating…' : 'Create list'}
               </button>
@@ -124,46 +157,66 @@ export default function WishlistsClient({ initialWishlists }: { initialWishlists
         </div>
       )}
 
-      {wishlists.length === 0 && !showForm ? (
+      {/* Empty state */}
+      {wishlists.length === 0 && !showForm && (
         <div className="text-center py-24 px-6">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-50 mb-4">
-            <svg className="w-8 h-8 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-            </svg>
+          <div
+            className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-4 text-3xl"
+            style={{ background: 'var(--a50)' }}
+          >
+            🛍️
           </div>
-          <h3 className="text-lg font-semibold text-slate-900 mb-2">No wishlists yet</h3>
-          <p className="text-slate-500 text-sm mb-6">Create your first list to start tracking what you want.</p>
+          <h3 className="text-lg font-semibold text-ink mb-2">No wishlists yet</h3>
+          <p className="text-dim text-sm mb-6">Create your first list to start tracking what you want.</p>
           <button
             onClick={() => setShowForm(true)}
-            className="px-5 py-2.5 rounded-xl bg-indigo-600 text-white font-medium text-sm hover:bg-indigo-700 transition"
+            className="px-5 py-2.5 rounded-xl font-medium text-sm transition-colors"
+            style={{ background: 'var(--a600)', color: 'var(--a-on)' }}
           >
             Create your first list
           </button>
         </div>
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
-          {wishlists.map((list) => (
-            <div key={list.id} className="group bg-white rounded-2xl border border-slate-200 p-5 hover:border-indigo-200 hover:shadow-md transition-all">
-              <div className="flex items-start justify-between gap-3">
-                <Link href={`/wishlists/${list.id}`} className="flex-1 min-w-0">
-                  <h3 className="font-semibold text-slate-900 group-hover:text-indigo-600 transition truncate">{list.name}</h3>
-                  {list.description && (
-                    <p className="text-sm text-slate-500 mt-0.5 truncate">{list.description}</p>
-                  )}
-                  <p className="text-xs text-slate-400 mt-2">
-                    Created {new Date(list.created_at).toLocaleDateString()}
-                  </p>
-                </Link>
-                <button
-                  onClick={() => deleteWishlist(list.id)}
-                  className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all"
-                  title="Delete list"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                </button>
-              </div>
+      )}
+
+      {/* Wishlist grid */}
+      {wishlists.length > 0 && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {wishlists.map(list => (
+            <div
+              key={list.id}
+              className="group relative bg-card border border-line rounded-2xl p-5 hover:border-[var(--a200)] transition-colors"
+            >
+              <button
+                onClick={() => deleteWishlist(list.id)}
+                className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-ghost hover:text-red-400 hover:bg-red-500/10 transition-all"
+                title="Delete list"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+
+              <Link href={`/wishlists/${list.id}`} className="block">
+                <div className="flex items-center gap-3 mb-3">
+                  <div
+                    className="flex items-center justify-center w-11 h-11 rounded-xl text-2xl shrink-0"
+                    style={{ background: 'var(--a50)' }}
+                  >
+                    {list.emoji ?? '🛍️'}
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="font-semibold text-ink truncate group-hover:text-[var(--a500)] transition-colors">
+                      {list.name}
+                    </h3>
+                    {list.description && (
+                      <p className="text-dim text-xs truncate mt-0.5">{list.description}</p>
+                    )}
+                  </div>
+                </div>
+                <p className="text-xs text-ghost">
+                  Created {new Date(list.created_at).toLocaleDateString()}
+                </p>
+              </Link>
             </div>
           ))}
         </div>
