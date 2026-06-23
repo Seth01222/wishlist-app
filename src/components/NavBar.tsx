@@ -9,7 +9,8 @@ import { ACCENTS } from '@/lib/theme'
 
 export default function NavBar({ userEmail }: { userEmail: string }) {
   const router = useRouter()
-  const { mode, accent, toggleMode, setAccent } = useTheme()
+  const { mode, accent, toggleMode, setAccent, taxEnabled, taxRate, setTaxEnabled, setTaxRate } = useTheme()
+  const [taxInput, setTaxInput] = useState(String(taxRate || ''))
   const [showMenu, setShowMenu] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
@@ -110,6 +111,46 @@ export default function NavBar({ userEmail }: { userEmail: string }) {
                       />
                     ))}
                   </div>
+                </div>
+
+                {/* Sales tax */}
+                <div className="px-4 py-3 border-b border-line">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs text-ghost">Sales tax</p>
+                    <button
+                      role="switch"
+                      aria-checked={taxEnabled}
+                      onClick={() => setTaxEnabled(!taxEnabled)}
+                      className={`relative w-8 rounded-full transition-colors spring ${taxEnabled ? '' : 'bg-line'}`}
+                      style={{ height: '18px', ...(taxEnabled ? { background: 'var(--a600)' } : {}) }}
+                    >
+                      <span
+                        className="absolute top-0.5 left-0.5 w-3.5 h-3.5 rounded-full bg-white shadow transition-transform"
+                        style={{ transform: taxEnabled ? 'translateX(14px)' : 'translateX(0)' }}
+                      />
+                    </button>
+                  </div>
+                  {taxEnabled && (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min="0"
+                        max="30"
+                        step="0.01"
+                        value={taxInput}
+                        onChange={e => {
+                          setTaxInput(e.target.value)
+                          const n = parseFloat(e.target.value)
+                          if (!isNaN(n) && n >= 0) setTaxRate(n)
+                        }}
+                        placeholder="8.25"
+                        className="w-20 px-2 py-1 text-sm rounded-lg border border-line bg-raised text-ink focus:outline-none focus:ring-2 focus:border-transparent"
+                        style={{ '--tw-ring-color': 'var(--a500)' } as React.CSSProperties}
+                        autoFocus
+                      />
+                      <span className="text-sm text-dim">% rate</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Sign out */}

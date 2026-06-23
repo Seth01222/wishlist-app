@@ -6,19 +6,22 @@ export default async function WishlistDetailPage({ params }: { params: Promise<{
   const { id } = await params
   const supabase = await createClient()
 
-  const { data: wishlist } = await supabase
-    .from('wishlists')
-    .select('id, name, description')
-    .eq('id', id)
-    .single()
+  const [{ data: wishlist }, { data: items }, { data: allLists }] = await Promise.all([
+    supabase.from('wishlists').select('id, name, description').eq('id', id).single(),
+    supabase.from('wishlist_items')
+      .select('id, name, url, image_url, notes, target_price, auto_price, auto_currency, star_rating, quantity, purchased, purchased_at, tags, created_at')
+      .eq('wishlist_id', id)
+      .order('created_at', { ascending: false }),
+    supabase.from('wishlists').select('id, name, emoji').order('name'),
+  ])
 
   if (!wishlist) notFound()
 
-  const { data: items } = await supabase
-    .from('wishlist_items')
-    .select('id, name, url, image_url, notes, target_price, priority, tags, created_at')
-    .eq('wishlist_id', id)
-    .order('created_at', { ascending: false })
-
-  return <WishlistDetailClient wishlist={wishlist} initialItems={items ?? []} />
+  return (
+    <WishlistDetailClient
+      wishlist={wishlist}
+      initialItems={items ?? []}
+      otherLists={allLists ?? []}
+    />
+  )
 }

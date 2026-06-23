@@ -18,7 +18,7 @@ export const viewport: Viewport = {
   initialScale: 1,
 }
 
-// Runs before React hydrates — sets the right class instantly so there's no flash
+// Runs before React hydrates — sets theme + registers service worker
 const themeScript = `
 (function(){
   try {
@@ -28,6 +28,11 @@ const themeScript = `
     else document.documentElement.classList.remove('dark');
     document.documentElement.setAttribute('data-accent', a);
   } catch(e){}
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function() {
+      navigator.serviceWorker.register('/sw.js').catch(function(){});
+    });
+  }
 })();
 `
 
