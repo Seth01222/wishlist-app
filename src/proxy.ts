@@ -1,7 +1,19 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { DEMO_COOKIE } from '@/lib/demo/config'
 
 export async function proxy(request: NextRequest) {
+  // Demo mode: treat the demo cookie as a logged-in session and skip Supabase.
+  if (request.cookies.get(DEMO_COOKIE)?.value === '1') {
+    const { pathname } = request.nextUrl
+    if (pathname.startsWith('/login') || pathname.startsWith('/signup')) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/wishlists'
+      return NextResponse.redirect(url)
+    }
+    return NextResponse.next()
+  }
+
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
     return NextResponse.next()
   }

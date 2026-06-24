@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { DEMO_EMAIL, setDemoCookie } from '@/lib/demo/config'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -12,9 +13,21 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
+  // Enter demo mode: no Supabase, just a cookie + pre-seeded data.
+  function startDemo() {
+    setDemoCookie()
+    router.push('/wishlists')
+    router.refresh()
+  }
+
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
+    // The demo account skips Supabase entirely (any password works).
+    if (email.trim().toLowerCase() === DEMO_EMAIL) {
+      startDemo()
+      return
+    }
     setLoading(true)
     const supabase = createClient()
     const { error } = await supabase.auth.signInWithPassword({ email, password })
@@ -59,6 +72,22 @@ export default function LoginPage() {
           {loading ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
+
+      <div className="my-5 flex items-center gap-3 text-xs text-ghost">
+        <span className="flex-1 h-px bg-line" />
+        or
+        <span className="flex-1 h-px bg-line" />
+      </div>
+
+      <button
+        type="button" onClick={startDemo}
+        className="w-full py-2.5 px-4 rounded-lg font-medium border border-line bg-raised text-ink hover:bg-line transition-colors"
+      >
+        🛍️ Try the demo — no account needed
+      </button>
+      <p className="mt-2 text-center text-xs text-ghost">
+        Explore a sample account with pre-filled wishlists and items.
+      </p>
 
       <p className="mt-6 text-center text-sm text-dim">
         Don&apos;t have an account?{' '}
