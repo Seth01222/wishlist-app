@@ -46,6 +46,14 @@ create table if not exists public.wishlist_items (
   created_at    timestamptz not null default now()
 );
 
+-- Per-user settings, including the optional SerpApi key used by the
+-- "search by name" price-lookup mode. One row per user.
+create table if not exists public.profiles (
+  id          uuid primary key references auth.users (id) on delete cascade,
+  serpapi_key text,
+  created_at  timestamptz not null default now()
+);
+
 -- ─── Indexes ───────────────────────────────────────────────────────────────
 -- Speeds up the per-user list query and the per-list items query.
 
@@ -56,6 +64,20 @@ create index if not exists wishlist_items_wishlist_id_idx on public.wishlist_ite
 
 alter table public.wishlists      enable row level security;
 alter table public.wishlist_items enable row level security;
+alter table public.profiles       enable row level security;
+
+-- Profiles: a user may only read/write their own row.
+drop policy if exists "profiles_select_own" on public.profiles;
+create policy "profiles_select_own" on public.profiles
+  for select using (auth.uid() = id);
+
+drop policy if exists "profiles_insert_own" on public.profiles;
+create policy "profiles_insert_own" on public.profiles
+  for insert with check (auth.uid() = id);
+
+drop policy if exists "profiles_update_own" on public.profiles;
+create policy "profiles_update_own" on public.profiles
+  for update using (auth.uid() = id) with check (auth.uid() = id);
 
 -- Wishlists: a user may only touch their own rows.
 drop policy if exists "wishlists_select_own" on public.wishlists;

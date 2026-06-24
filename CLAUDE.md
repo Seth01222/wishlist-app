@@ -37,6 +37,7 @@ Supabase SQL editor to recreate the DB). Current tables:
 - `wishlist_items` — items in a list: `wishlist_id`, `name`, `url`, `image_url`, `notes`,
   `target_price`, `auto_price`, `auto_currency`, `star_rating`, `quantity`, `purchased`,
   `purchased_at`, `tags`, `created_at`
+- `profiles` — per-user settings: `id` (= auth user id), `serpapi_key`, `created_at`
 
 **Security:** the app's SELECT queries do not filter by `user_id`; per-user isolation is
 enforced entirely by Row Level Security (policies in `schema.sql`). RLS must stay enabled.
@@ -51,8 +52,11 @@ Planned tables (not built yet):
 2. ✅ Supabase + auth (sign up / log in)
 3. ✅ Create and manage wishlists (CRUD)
 4. ✅ Add items to wishlists (manual entry)
-5. ✅ Price lookup — URL mode (`src/app/api/fetch-url`)
-6. ⬜ Price lookup — SerpAPI mode
+5. ✅ Price lookup — URL mode (`src/app/api/fetch-url`), best-effort (blocked by Amazon etc.)
+   - ✅ Automatic capture via bookmarklet + browser extension (`extension/`, `/tools`) —
+     runs in the user's browser so it works on Amazon. Shared extractor: `extension/extract.js`.
+6. 🟡 Price lookup — SerpAPI mode: "search by name" implemented (`/api/search`, `/tools`,
+   user's key in `profiles`). Query-based, not the originally-planned URL-based flow.
 7. ⬜ Price lookup — Claude AI mode
 8. ✅ PWA setup (installable on iPhone + Mac)
 9. ⬜ Price alerts (email when price drops below target)

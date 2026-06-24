@@ -97,17 +97,27 @@ Open http://localhost:3000.
 
 ---
 
-## How price lookup works
+## Getting product info automatically
 
-CLAUDE.md describes three planned modes. Currently implemented:
+Big retailers (Amazon especially) block server-side scrapers, so pasting a URL
+and scraping it from the server is unreliable. The app offers several capture
+methods, strongest first — see the in-app **Quick Add** page (`/tools`):
 
-- **URL mode (free, always on):** the `/api/fetch-url` route fetches the product
-  page server-side and extracts price/title/image from JSON-LD, Open Graph,
-  Twitter cards, and common microdata. It only follows `http(s)` URLs and blocks
-  requests to private/internal addresses (SSRF protection).
+1. **Bookmarklet / browser extension (most reliable, free).** Runs in *your*
+   browser on the product page, so it reads the real, rendered price and image
+   and isn't blocked. The extension lives in [`extension/`](extension/); the
+   bookmarklet is generated on the Quick Add page. Both hand off to the app's
+   add-to-list flow with everything pre-filled.
+2. **Search by name (SerpApi, cross-device incl. iPhone).** Paste your own free
+   SerpApi key on the Quick Add page, then search by product name and pick a
+   result. The key is stored per-user in the `profiles` table and used only
+   server-side (`/api/search`).
+3. **URL mode (server scrape, best-effort).** `/api/fetch-url` fetches the page
+   and reads price/title/image from JSON-LD, Open Graph, Twitter cards, and
+   microdata. It allows only `http(s)` and blocks private/internal addresses
+   (SSRF protection). Works on friendly sites; expect it to fail on Amazon.
 
-Planned (see CLAUDE.md): SerpAPI mode and Claude AI mode, both using
-user-supplied keys.
+Still planned (see CLAUDE.md): a Claude AI lookup mode.
 
 ---
 
@@ -117,15 +127,19 @@ user-supplied keys.
 src/
   app/
     (auth)/            login & signup pages
-    (app)/             authenticated app (wishlists, item detail)
-    api/fetch-url/     server-side price/metadata scraper
+    (app)/             authenticated app (wishlists, item detail, tools)
+    (app)/tools/       Quick Add: bookmarklet, extension help, name search
+    api/fetch-url/     server-side price/metadata scraper (best-effort)
+    api/search/        SerpApi product search (uses the user's key)
     share-target/      iOS Share Sheet landing route
     page.tsx           redirects to /wishlists or /login
   components/          UI building blocks (NavBar, cards, modals, etc.)
   lib/
     supabase/          browser & server Supabase clients
     demo/              demo-mode cookie, seed data, and mock client
+    ui.ts              shared form styling
   proxy.ts             auth gate (Next.js 16 "proxy", formerly middleware)
+extension/             browser extension (Quick Add toolbar button)
 public/                manifest, service worker, icons
 supabase/schema.sql    database tables + RLS policies
 ```

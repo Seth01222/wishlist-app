@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>My Wishlist — Settings</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 460px; margin: 2rem auto; padding: 0 1rem; color: #111; }
+    h1 { font-size: 1.1rem; }
+    label { display: block; font-size: .85rem; font-weight: 600; margin: 1rem 0 .35rem; }
+    input { width: 100%; padding: .6rem .7rem; border: 1px solid #ccc; border-radius: .5rem; font-size: .95rem; box-sizing: border-box; }
+    button { margin-top: 1rem; padding: .6rem 1rem; border: 0; border-radius: .5rem; background: #4f46e5; color: #fff; font-weight: 600; cursor: pointer; }
+    p { color: #555; font-size: .85rem; line-height: 1.4; }
+    .ok { color: #16a34a; font-weight: 600; font-size: .85rem; margin-left: .5rem; }
+  </style>
+</head>
+<body>
+  <h1>My Wishlist — Quick Add</h1>
+  <p>Enter the web address where your wishlist app is hosted. The toolbar button
+     will open this site to add items.</p>
+  <label for="origin">App URL</label>
+  <input id="origin" type="url" placeholder="https://your-app.vercel.app" />
+  <div>
+    <button id="save">Save</button>
+    <span id="status" class="ok" hidden>Saved ✓</span>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>
