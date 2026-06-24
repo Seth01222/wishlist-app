@@ -14,7 +14,17 @@ export type DemoWishlist = {
   description: string | null
   emoji: string | null
   archived: boolean
+  budget: number | null
   created_at: string
+}
+
+export type DemoPriceRecord = {
+  id: string
+  item_id: string
+  price: number
+  currency: string
+  source: string
+  recorded_at: string
 }
 
 export type DemoItem = {
@@ -36,11 +46,11 @@ export type DemoItem = {
 }
 
 const WISHLISTS: DemoWishlist[] = [
-  { id: 'list-tech',    name: 'Tech & Gadgets',    description: 'Upgrades for my desk setup',          emoji: '🎧', archived: false, created_at: daysAgo(2) },
-  { id: 'list-wardrobe',name: 'Wardrobe Refresh',  description: 'Spring clothing haul',                 emoji: '👟', archived: false, created_at: daysAgo(9) },
-  { id: 'list-birthday',name: 'Birthday Wishlist',  description: 'Ideas for friends & family to grab',   emoji: '🎂', archived: false, created_at: daysAgo(15) },
-  { id: 'list-home',    name: 'Home & Kitchen',     description: 'Making the apartment nicer',           emoji: '🏠', archived: false, created_at: daysAgo(28) },
-  { id: 'list-gaming',  name: 'Gaming Setup',       description: 'Saved for later — already finished!',  emoji: '🎮', archived: true,  created_at: daysAgo(60) },
+  { id: 'list-tech',    name: 'Tech & Gadgets',    description: 'Upgrades for my desk setup',          emoji: '🎧', archived: false, budget: 1200, created_at: daysAgo(2) },
+  { id: 'list-wardrobe',name: 'Wardrobe Refresh',  description: 'Spring clothing haul',                 emoji: '👟', archived: false, budget: 650,  created_at: daysAgo(9) },
+  { id: 'list-birthday',name: 'Birthday Wishlist',  description: 'Ideas for friends & family to grab',   emoji: '🎂', archived: false, budget: 150,  created_at: daysAgo(15) },
+  { id: 'list-home',    name: 'Home & Kitchen',     description: 'Making the apartment nicer',           emoji: '🏠', archived: false, budget: 800,  created_at: daysAgo(28) },
+  { id: 'list-gaming',  name: 'Gaming Setup',       description: 'Saved for later — already finished!',  emoji: '🎮', archived: true,  budget: 1500, created_at: daysAgo(60) },
 ]
 
 const ITEMS: DemoItem[] = [
@@ -127,11 +137,65 @@ const ITEMS: DemoItem[] = [
     star_rating: 5, quantity: 1, purchased: true, purchased_at: daysAgo(50), tags: ['furniture'], created_at: daysAgo(59) },
 ]
 
+/* ── Synthetic price history ──────────────────────────────────────
+ * Real price history accumulates over time in the price_records table. For the
+ * demo we generate a believable series per item (deterministic, so it's stable
+ * across renders) ending at the item's current auto_price. Some items trend
+ * down to their lowest-ever today, others wobble — so the sparkline, "lowest
+ * ever", and price-drop insights all have something to show.
+ */
+function seeded(seed: string) {
+  let h = 2166136261
+  for (let i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 16777619) }
+  return () => { h += 0x6d2b79f5; let t = h; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296 }
+}
+
+const HISTORY: Record<string, DemoPriceRecord[]> = (() => {
+  const out: Record<string, DemoPriceRecord[]> = {}
+  for (const it of ITEMS) {
+    const end = it.auto_price ?? it.target_price
+    if (end == null) continue
+    const rnd = seeded(it.id)
+    const start = new Date(it.created_at).getTime()
+    const span = Date.now() - start
+    const points = 6 + Math.floor(rnd() * 4) // 6–9 points
+    // Half the items drift down to "lowest today"; others started lower.
+    const trendDown = rnd() > 0.5
+    const startMult = trendDown ? 1 + (0.12 + rnd() * 0.18) : 1 - (0.05 + rnd() * 0.08)
+    const recs: DemoPriceRecord[] = []
+    for (let p = 0; p < points; p++) {
+      const f = p / (points - 1)
+      const base = end * (startMult + (1 - startMult) * f)
+      const noise = p === points - 1 ? 1 : 1 + (rnd() - 0.5) * 0.06
+      const price = Math.max(1, Math.round(base * noise * 100) / 100)
+      recs.push({
+        id: `${it.id}-h${p}`,
+        item_id: it.id,
+        price: p === points - 1 ? Number(end) : price,
+        currency: it.auto_currency ?? 'USD',
+        source: p === points - 1 ? 'auto' : 'auto',
+        recorded_at: new Date(start + (span * p) / (points - 1)).toISOString(),
+      })
+    }
+    out[it.id] = recs
+  }
+  return out
+})()
+
 /* ── Selectors that match each page's Supabase query shape ── */
 
 // Wishlists list page: ordered by created_at descending.
 export function getDemoWishlists() {
   return [...WISHLISTS].sort((a, b) => b.created_at.localeCompare(a.created_at))
+}
+
+// Price history for every item in a list, keyed by item id (oldest → newest).
+export function getDemoPriceHistory(wishlistId: string): Record<string, DemoPriceRecord[]> {
+  const out: Record<string, DemoPriceRecord[]> = {}
+  for (const it of ITEMS) {
+    if (it.wishlist_id === wishlistId && HISTORY[it.id]) out[it.id] = HISTORY[it.id]
+  }
+  return out
 }
 
 // Lightweight per-item rows used for list cards' counts/totals.
@@ -145,10 +209,10 @@ export function getDemoItemSummary() {
   }))
 }
 
-// Single wishlist header for the detail page (id, name, description).
+// Single wishlist header for the detail page (id, name, description, budget).
 export function getDemoWishlist(id: string) {
   const w = WISHLISTS.find(w => w.id === id)
-  return w ? { id: w.id, name: w.name, description: w.description } : null
+  return w ? { id: w.id, name: w.name, description: w.description, budget: w.budget } : null
 }
 
 // Items for a list, newest first. (The detail page's Item type doesn't include

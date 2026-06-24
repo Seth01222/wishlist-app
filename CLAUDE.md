@@ -33,10 +33,12 @@ Users can choose any mode per lookup:
 ## Database Schema
 The source of truth is [`supabase/schema.sql`](supabase/schema.sql) (run it in the
 Supabase SQL editor to recreate the DB). Current tables:
-- `wishlists` — user's lists: `user_id`, `name`, `description`, `emoji`, `archived`, `created_at`
+- `wishlists` — user's lists: `user_id`, `name`, `description`, `emoji`, `archived`, `budget`, `created_at`
 - `wishlist_items` — items in a list: `wishlist_id`, `name`, `url`, `image_url`, `notes`,
   `target_price`, `auto_price`, `auto_currency`, `star_rating`, `quantity`, `purchased`,
   `purchased_at`, `tags`, `created_at`
+- `price_records` — price history per item: `item_id`, `price`, `currency`, `source`,
+  `recorded_at` (powers sparkline / lowest-ever / drop badges)
 - `profiles` — per-user settings: `id` (= auth user id), `serpapi_key`, `created_at`
 
 **Security:** the app's SELECT queries do not filter by `user_id`; per-user isolation is
@@ -60,7 +62,10 @@ Planned tables (not built yet):
 7. ⬜ Price lookup — Claude AI mode
 8. ✅ PWA setup (installable on iPhone + Mac)
 9. ⬜ Price alerts (email when price drops below target)
-10. ⬜ Price history charts
+10. ✅ Price history charts — "price smarts": per-item sparkline, target progress bar,
+    lowest-ever / drop badges, per-item re-check, per-list budget meter. Customizable via
+    the "Price insights" settings (localStorage; `src/lib/usePriceInsights.tsx`).
+    Components in `src/components/price/`; pure helpers in `src/lib/price.ts`.
 11. 🟡 Tags + priority ranking (tags + star rating + "smart" sort done; no priority field)
 12. ⬜ Shareable lists (public link) — note: `/share-target` only *receives* iOS shares
 
