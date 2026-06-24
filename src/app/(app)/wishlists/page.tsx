@@ -7,9 +7,14 @@ import WishlistsClient from './WishlistsClient'
 export default async function WishlistsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ share?: string; shareTitle?: string }>
+  searchParams: Promise<{
+    share?: string; shareTitle?: string
+    sharePrice?: string; shareImage?: string; shareCurrency?: string
+  }>
 }) {
-  const { share, shareTitle } = await searchParams
+  const { share, shareTitle, sharePrice, shareImage, shareCurrency } = await searchParams
+  // Quick-add payload from the bookmarklet / extension / iOS Share Sheet.
+  const shareProps = { shareUrl: share, shareTitle, sharePrice, shareImage, shareCurrency }
 
   const cookieStore = await cookies()
   if (cookieStore.get(DEMO_COOKIE)?.value === '1') {
@@ -17,8 +22,7 @@ export default async function WishlistsPage({
       <WishlistsClient
         initialWishlists={getDemoWishlists()}
         itemSummary={getDemoItemSummary()}
-        shareUrl={share}
-        shareTitle={shareTitle}
+        {...shareProps}
       />
     )
   }
@@ -37,8 +41,7 @@ export default async function WishlistsPage({
     <WishlistsClient
       initialWishlists={wishlists ?? []}
       itemSummary={itemSummary ?? []}
-      shareUrl={share}
-      shareTitle={shareTitle}
+      {...shareProps}
     />
   )
 }

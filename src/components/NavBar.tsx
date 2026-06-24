@@ -50,6 +50,16 @@ export default function NavBar({ userEmail }: { userEmail: string }) {
 
         {/* Right side */}
         <div className="flex items-center gap-2">
+          {/* Quick Add tools (bookmarklet / extension) */}
+          <Link
+            href="/tools"
+            className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-dim hover:text-ink hover:bg-raised transition-colors text-sm font-medium"
+            title="Quick Add — bookmarklet & browser extension"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>
+            <span className="hidden sm:block">Quick Add</span>
+          </Link>
+
           {/* Dark mode toggle */}
           <button
             onClick={toggleMode}

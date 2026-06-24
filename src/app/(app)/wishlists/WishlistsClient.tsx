@@ -18,15 +18,15 @@ const fmt = (n: number) => n.toLocaleString('en-US', { style: 'currency', curren
 
 function itemPrice(r: ItemSummaryRow) { return Number(r.auto_price ?? r.target_price ?? 0) * (r.quantity ?? 1) }
 
-export default function WishlistsClient({ initialWishlists, itemSummary, shareUrl, shareTitle }: { initialWishlists: Wishlist[]; itemSummary: ItemSummaryRow[]; shareUrl?: string; shareTitle?: string }) {
+export default function WishlistsClient({ initialWishlists, itemSummary, shareUrl, shareTitle, sharePrice, shareImage, shareCurrency }: { initialWishlists: Wishlist[]; itemSummary: ItemSummaryRow[]; shareUrl?: string; shareTitle?: string; sharePrice?: string; shareImage?: string; shareCurrency?: string }) {
   const router = useRouter()
   const [wishlists, setWishlists] = useState(initialWishlists)
   const [showForm, setShowForm] = useState(false)
   const [showArchived, setShowArchived] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [editingList, setEditingList] = useState<Wishlist | null>(null)
-  const [shareModal, setShareModal] = useState<{ url: string; title: string } | null>(
-    shareUrl ? { url: shareUrl, title: shareTitle ?? '' } : null
+  const [shareModal, setShareModal] = useState<{ url: string; title: string; price?: string; image?: string; currency?: string } | null>(
+    shareUrl ? { url: shareUrl, title: shareTitle ?? '', price: sharePrice, image: shareImage, currency: shareCurrency } : null
   )
 
   // Clear the ?share= query params from the URL once modal is shown
@@ -229,6 +229,9 @@ export default function WishlistsClient({ initialWishlists, itemSummary, shareUr
         <ShareModal
           sharedUrl={shareModal.url}
           sharedTitle={shareModal.title}
+          sharedPrice={shareModal.price}
+          sharedImage={shareModal.image}
+          sharedCurrency={shareModal.currency}
           lists={wishlists.filter(w => !w.archived)}
           onClose={() => setShareModal(null)}
         />
@@ -304,12 +307,15 @@ function ListCard({ list, stats, onEdit, onDelete, onArchive }: {
 }
 
 /* ─── Share target modal ────────────────────────────────────── */
-function ShareModal({ sharedUrl, sharedTitle, lists, onClose }: {
-  sharedUrl: string; sharedTitle: string; lists: Wishlist[]; onClose: () => void
+function ShareModal({ sharedUrl, sharedTitle, sharedPrice, sharedImage, sharedCurrency, lists, onClose }: {
+  sharedUrl: string; sharedTitle: string; sharedPrice?: string; sharedImage?: string; sharedCurrency?: string
+  lists: Wishlist[]; onClose: () => void
 }) {
   const router = useRouter()
   const [selected, setSelected] = useState<string | null>(lists[0]?.id ?? null)
   const [loading, setLoading] = useState(false)
+
+  const priceNum = sharedPrice ? parseFloat(sharedPrice) : null
 
   async function addToList() {
     if (!selected) return
@@ -319,6 +325,9 @@ function ShareModal({ sharedUrl, sharedTitle, lists, onClose }: {
       wishlist_id: selected,
       name: sharedTitle || sharedUrl,
       url: sharedUrl || null,
+      image_url: sharedImage || null,
+      auto_price: priceNum != null && !isNaN(priceNum) ? priceNum : null,
+      auto_currency: priceNum != null && !isNaN(priceNum) ? (sharedCurrency || 'USD') : null,
     })
     onClose()
     router.push(`/wishlists/${selected}`)
@@ -327,8 +336,21 @@ function ShareModal({ sharedUrl, sharedTitle, lists, onClose }: {
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4">
       <div className="bg-card border border-line rounded-2xl shadow-2xl w-full max-w-sm p-5">
-        <h2 className="font-semibold text-ink mb-1">Add to Wishlist</h2>
-        <p className="text-dim text-xs mb-3 truncate">{sharedTitle || sharedUrl}</p>
+        <h2 className="font-semibold text-ink mb-3">Add to Wishlist</h2>
+        <div className="flex items-center gap-3 mb-4 p-2 rounded-xl bg-raised">
+          {sharedImage
+            // eslint-disable-next-line @next/next/no-img-element
+            ? <img src={sharedImage} alt="" className="w-12 h-12 rounded-lg object-cover shrink-0 bg-card" />
+            : <div className="w-12 h-12 rounded-lg shrink-0 flex items-center justify-center text-xl bg-card">🛍️</div>}
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-ink line-clamp-2">{sharedTitle || sharedUrl}</p>
+            {priceNum != null && !isNaN(priceNum) && (
+              <p className="text-sm font-semibold mt-0.5" style={{ color: 'var(--a500)' }}>
+                {priceNum.toLocaleString('en-US', { style: 'currency', currency: sharedCurrency || 'USD' })}
+              </p>
+            )}
+          </div>
+        </div>
         <p className="text-sm font-medium text-ink mb-2">Choose a list:</p>
         {lists.length === 0
           ? <p className="text-ghost text-sm mb-4">Create a list first.</p>
