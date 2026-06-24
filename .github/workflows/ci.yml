@@ -1,0 +1,39 @@
+name: CI
+
+# Catches type errors, lint problems, and build breakages before they reach
+# Vercel — the kind of failures that otherwise only show up at deploy time.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      # Note: `npm run lint` is intentionally not run here. The existing codebase
+      # has pre-existing lint errors, and Vercel's build does not run lint — so
+      # gating CI on it would be red without reflecting deploy health. Type-check
+      # + build are what actually catch deploy-breaking issues.
+
+      - name: Build
+        run: npm run build
+        env:
+          # Build-time placeholders so the build succeeds without real secrets.
+          # (NEXT_PUBLIC_* are inlined at build time; these are dummy values.)
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: dummy-anon-key

@@ -9,12 +9,11 @@ import TaxPrice from '@/components/TaxPrice'
 import { useTheme } from '@/components/ThemeProvider'
 import ImportModal from '@/components/ImportModal'
 import EmojiPicker from '@/components/EmojiPicker'
+import { INPUT_CLASS as INPUT, RING_STYLE as RING } from '@/lib/ui'
 
 type Wishlist = { id: string; name: string; description: string | null; created_at: string; emoji: string | null; archived: boolean | null }
 type ItemSummaryRow = { wishlist_id: string; purchased: boolean | null; auto_price: number | null; target_price: number | null; quantity: number | null }
 
-const INPUT = "w-full px-3.5 py-2.5 rounded-lg border border-line bg-raised text-ink placeholder:text-ghost focus:outline-none focus:ring-2 focus:border-transparent transition-colors"
-const RING = { '--tw-ring-color': 'var(--a500)' } as React.CSSProperties
 const fmt = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 })
 
 function itemPrice(r: ItemSummaryRow) { return Number(r.auto_price ?? r.target_price ?? 0) * (r.quantity ?? 1) }

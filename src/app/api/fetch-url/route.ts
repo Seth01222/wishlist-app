@@ -1,6 +1,100 @@
 import { NextRequest, NextResponse } from 'next/server'
+import dns from 'node:dns/promises'
 
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
+
+/* ── SSRF protection ──────────────────────────────────────────────
+ * This endpoint fetches an arbitrary user-supplied URL server-side, so we must
+ * stop it from being used to reach internal/cloud-internal hosts (e.g.
+ * 169.254.169.254 metadata, localhost, private LAN ranges). We allow only
+ * http/https and reject any URL whose host — or whose DNS-resolved IPs — fall
+ * in a private/loopback/link-local range. Resolving DNS guards against a public
+ * hostname that points at an internal address (DNS-rebinding style abuse).
+ */
+
+function ipv4ToInt(ip: string): number | null {
+  const parts = ip.split('.')
+  if (parts.length !== 4) return null
+  let n = 0
+  for (const p of parts) {
+    const o = Number(p)
+    if (!Number.isInteger(o) || o < 0 || o > 255) return null
+    n = n * 256 + o
+  }
+  return n >>> 0
+}
+
+function isPrivateIPv4(ip: string): boolean {
+  const n = ipv4ToInt(ip)
+  if (n === null) return false
+  const inRange = (base: string, bits: number) => {
+    const b = ipv4ToInt(base)!
+    const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0
+    return (n & mask) === (b & mask)
+  }
+  return (
+    inRange('0.0.0.0', 8) ||        // "this" network
+    inRange('10.0.0.0', 8) ||       // private
+    inRange('100.64.0.0', 10) ||    // CGNAT
+    inRange('127.0.0.0', 8) ||      // loopback
+    inRange('169.254.0.0', 16) ||   // link-local (incl. cloud metadata)
+    inRange('172.16.0.0', 12) ||    // private
+    inRange('192.0.0.0', 24) ||     // IETF protocol assignments
+    inRange('192.168.0.0', 16) ||   // private
+    inRange('198.18.0.0', 15) ||    // benchmarking
+    inRange('224.0.0.0', 4) ||      // multicast
+    inRange('240.0.0.0', 4)         // reserved
+  )
+}
+
+function isPrivateIPv6(ip: string): boolean {
+  const addr = ip.toLowerCase().split('%')[0] // strip zone id
+  if (addr === '::1' || addr === '::') return true
+  // IPv4-mapped (::ffff:a.b.c.d) — validate the embedded v4 address.
+  const mapped = addr.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/)
+  if (mapped) return isPrivateIPv4(mapped[1])
+  if (addr.startsWith('fe8') || addr.startsWith('fe9') || addr.startsWith('fea') || addr.startsWith('feb')) return true // link-local fe80::/10
+  if (addr.startsWith('fc') || addr.startsWith('fd')) return true // unique local fc00::/7
+  return false
+}
+
+function isPrivateAddress(ip: string): boolean {
+  return ip.includes(':') ? isPrivateIPv6(ip) : isPrivateIPv4(ip)
+}
+
+async function validateUrl(raw: string): Promise<{ ok: true; url: URL } | { ok: false; reason: string }> {
+  let url: URL
+  try { url = new URL(raw) } catch { return { ok: false, reason: 'Invalid URL' } }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return { ok: false, reason: 'Only http and https URLs are allowed' }
+  }
+
+  const host = url.hostname.toLowerCase()
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) {
+    return { ok: false, reason: 'That host is not allowed' }
+  }
+
+  // If the host is already an IP literal, check it directly.
+  if (/^[\d.]+$/.test(host) || host.includes(':')) {
+    if (isPrivateAddress(host)) return { ok: false, reason: 'That host is not allowed' }
+    return { ok: true, url }
+  }
+
+  // Otherwise resolve DNS and reject if any resolved address is internal.
+  try {
+    const records = await dns.lookup(host, { all: true })
+    if (records.length === 0) return { ok: false, reason: 'Could not resolve host' }
+    if (records.some(r => isPrivateAddress(r.address))) {
+      return { ok: false, reason: 'That host is not allowed' }
+    }
+  } catch {
+    return { ok: false, reason: 'Could not resolve host' }
+  }
+
+  return { ok: true, url }
+}
 
 function getTag(html: string, patterns: RegExp[]): string | null {
   for (const re of patterns) {
@@ -105,21 +199,38 @@ export async function GET(request: NextRequest) {
   const url = request.nextUrl.searchParams.get('url')
   if (!url) return NextResponse.json({ error: 'url param required' }, { status: 400 })
 
-  try { new URL(url) } catch {
-    return NextResponse.json({ error: 'Invalid URL' }, { status: 400 })
+  const check = await validateUrl(url)
+  if (!check.ok) {
+    return NextResponse.json({ error: check.reason }, { status: 400 })
   }
 
   try {
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'identity',
-        'Cache-Control': 'no-cache',
-      },
-      signal: AbortSignal.timeout(15_000),
-    })
+    // Follow redirects manually so every hop is re-checked against the SSRF
+    // rules — otherwise a public URL could 30x-redirect to an internal host.
+    let target = check.url
+    let res: Response
+    for (let hop = 0; ; hop++) {
+      res = await fetch(target, {
+        redirect: 'manual',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'identity',
+          'Cache-Control': 'no-cache',
+        },
+        signal: AbortSignal.timeout(15_000),
+      })
+
+      const location = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null
+      if (!location) break
+      if (hop >= 5) {
+        return NextResponse.json({ error: 'Too many redirects' }, { status: 502 })
+      }
+      const next = await validateUrl(new URL(location, target).href)
+      if (!next.ok) return NextResponse.json({ error: next.reason }, { status: 400 })
+      target = next.url
+    }
 
     if (!res.ok) {
       return NextResponse.json({ error: `Site returned ${res.status}` }, { status: 502 })
