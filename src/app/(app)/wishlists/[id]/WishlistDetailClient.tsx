@@ -7,6 +7,7 @@ import TiltCard from '@/components/TiltCard'
 import StarRating from '@/components/StarRating'
 import TaxPrice from '@/components/TaxPrice'
 import { useTheme } from '@/components/ThemeProvider'
+import { INPUT_CLASS as INPUT, RING_STYLE as RING } from '@/lib/ui'
 
 /* ─── Types ──────────────────────────────────────────────────── */
 type Item = {
@@ -36,9 +37,6 @@ function retailerName(url: string | null): string | null {
   } catch { return null }
 }
 const itemTotal = (i: Item) => itemPrice(i) * (i.quantity ?? 1)
-
-const INPUT = "w-full px-3.5 py-2.5 rounded-lg border border-line bg-raised text-ink placeholder:text-ghost focus:outline-none focus:ring-2 focus:border-transparent transition-colors"
-const RING = { '--tw-ring-color': 'var(--a500)' } as React.CSSProperties
 
 async function fetchMeta(url: string): Promise<FetchedMeta | null> {
   try {

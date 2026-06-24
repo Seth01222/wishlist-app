@@ -50,7 +50,7 @@ function makeBuilder() {
       rows = Array.isArray(payload) ? payload : [payload]
       return builder
     },
-    update(_patch: Record<string, unknown>) { op = 'update'; return builder },
+    update() { op = 'update'; return builder },
     delete() { op = 'delete'; return builder },
     upsert(payload: Record<string, unknown> | Record<string, unknown>[]) {
       op = 'insert'

@@ -60,5 +60,9 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
+  // Skip the auth gate for Next internals and public static files. Note the
+  // explicit manifest.json / sw.js: without them the PWA manifest and service
+  // worker would be redirected to /login for logged-out visitors, breaking
+  // install and offline support.
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|manifest.json|sw.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?)$).*)'],
 }

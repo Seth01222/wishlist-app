@@ -151,11 +151,11 @@ export function getDemoWishlist(id: string) {
   return w ? { id: w.id, name: w.name, description: w.description } : null
 }
 
-// Items for a list, newest first, in the detail page's column shape.
+// Items for a list, newest first. (The detail page's Item type doesn't include
+// wishlist_id; leaving the extra field on the object is harmless.)
 export function getDemoItems(wishlistId: string) {
   return ITEMS.filter(i => i.wishlist_id === wishlistId)
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
-    .map(({ wishlist_id, ...item }) => item)
 }
 
 // Used by the "move item to another list" dropdown.

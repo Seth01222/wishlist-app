@@ -10,10 +10,15 @@ export const metadata: Metadata = {
   description: 'Track products you want and find the best prices',
   manifest: '/manifest.json',
   appleWebApp: { capable: true, statusBarStyle: 'black-translucent', title: 'My Wishlist' },
+  icons: {
+    icon: '/icon-192.png',
+    apple: '/apple-touch-icon.png',
+  },
 }
 
 export const viewport: Viewport = {
-  themeColor: '#6366f1',
+  // Matches manifest theme_color so the browser/status-bar chrome is consistent.
+  themeColor: '#4f46e5',
   width: 'device-width',
   initialScale: 1,
 }
