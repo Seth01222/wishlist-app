@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
 import { DEMO_COOKIE, DEMO_EMAIL } from '@/lib/demo/config'
+import { PriceInsightsProvider } from '@/lib/usePriceInsights'
 import NavBar from '@/components/NavBar'
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -19,11 +20,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <NavBar userEmail={email} />
-      <main className="flex-1 max-w-5xl w-full mx-auto px-4 py-8 sm:px-6">
-        {children}
-      </main>
-    </div>
+    <PriceInsightsProvider>
+      <div className="min-h-screen flex flex-col">
+        <NavBar userEmail={email} />
+        <main className="flex-1 max-w-5xl w-full mx-auto px-4 py-8 sm:px-6">
+          {children}
+        </main>
+      </div>
+    </PriceInsightsProvider>
   )
 }

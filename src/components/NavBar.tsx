@@ -6,12 +6,14 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useTheme } from './ThemeProvider'
 import { ACCENTS } from '@/lib/theme'
+import PriceSettingsModal from './price/PriceSettingsModal'
 
 export default function NavBar({ userEmail }: { userEmail: string }) {
   const router = useRouter()
   const { mode, accent, toggleMode, setAccent, taxEnabled, taxRate, setTaxEnabled, setTaxRate } = useTheme()
   const [taxInput, setTaxInput] = useState(String(taxRate || ''))
   const [showMenu, setShowMenu] = useState(false)
+  const [showPriceSettings, setShowPriceSettings] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -163,6 +165,17 @@ export default function NavBar({ userEmail }: { userEmail: string }) {
                   )}
                 </div>
 
+                {/* Price insights */}
+                <button
+                  onClick={() => { setShowMenu(false); setShowPriceSettings(true) }}
+                  className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-dim hover:text-ink hover:bg-raised transition-colors border-b border-line"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3v18h18M7 15l3-3 3 3 5-6" />
+                  </svg>
+                  Price insights
+                </button>
+
                 {/* Sign out */}
                 <button
                   onClick={() => { setShowMenu(false); handleSignOut() }}
@@ -178,6 +191,8 @@ export default function NavBar({ userEmail }: { userEmail: string }) {
           </div>
         </div>
       </div>
+
+      {showPriceSettings && <PriceSettingsModal onClose={() => setShowPriceSettings(false)} />}
     </header>
   )
 }

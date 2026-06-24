@@ -8,6 +8,11 @@ import StarRating from '@/components/StarRating'
 import TaxPrice from '@/components/TaxPrice'
 import { useTheme } from '@/components/ThemeProvider'
 import { INPUT_CLASS as INPUT, RING_STYLE as RING } from '@/lib/ui'
+import { usePriceSettings } from '@/lib/usePriceInsights'
+import { type PriceRecord } from '@/lib/price'
+import PriceInsights from '@/components/price/PriceInsights'
+import BudgetMeter from '@/components/price/BudgetMeter'
+import RecheckButton from '@/components/price/RecheckButton'
 
 /* ─── Types ──────────────────────────────────────────────────── */
 type Item = {
@@ -17,7 +22,7 @@ type Item = {
   purchased: boolean; purchased_at: string | null; tags: string[] | null
   created_at: string
 }
-type Wishlist = { id: string; name: string; description: string | null }
+type Wishlist = { id: string; name: string; description: string | null; budget?: number | null }
 type OtherList = { id: string; name: string; emoji: string | null }
 type FetchedMeta = { title: string | null; image: string | null; price: string | null; currency: string; error?: string }
 type ViewMode = 'card' | 'compact'
@@ -47,9 +52,13 @@ async function fetchMeta(url: string): Promise<FetchedMeta | null> {
 
 /* ─── Main component ─────────────────────────────────────────── */
 export default function WishlistDetailClient({
-  wishlist, initialItems, otherLists,
-}: { wishlist: Wishlist; initialItems: Item[]; otherLists: OtherList[] }) {
+  wishlist, initialItems, otherLists, historyByItem = {},
+}: { wishlist: Wishlist; initialItems: Item[]; otherLists: OtherList[]; historyByItem?: Record<string, PriceRecord[]> }) {
+  const { settings } = usePriceSettings()
   const [items, setItems] = useState(initialItems)
+  const [budget, setBudget] = useState<number | null>(wishlist.budget ?? null)
+  const [budgetInput, setBudgetInput] = useState(wishlist.budget != null ? String(wishlist.budget) : '')
+  const [history, setHistory] = useState<Record<string, PriceRecord[]>>(historyByItem)
   const [view, setView] = useState<ViewMode>('card')
   const [sort, setSort] = useState<SortKey>('date')
   const [search, setSearch] = useState('')
@@ -143,8 +152,39 @@ export default function WishlistDetailClient({
 
   async function saveListName() {
     setEditingListName(false)
+    const parsedBudget = budgetInput.trim() ? parseFloat(budgetInput) : null
+    const nextBudget = parsedBudget != null && !isNaN(parsedBudget) && parsedBudget >= 0 ? parsedBudget : null
+    setBudget(nextBudget)
     const supabase = createClient()
-    await supabase.from('wishlists').update({ name: listName.trim() || wishlist.name, description: listDesc.trim() || null }).eq('id', wishlist.id)
+    await supabase.from('wishlists')
+      .update({ name: listName.trim() || wishlist.name, description: listDesc.trim() || null, budget: nextBudget })
+      .eq('id', wishlist.id)
+  }
+
+  // Append a price observation to history (DB + local state for a live chart).
+  async function recordPrice(itemId: string, price: number, currency: string | null) {
+    if (!price || price <= 0) return
+    setHistory(prev => ({
+      ...prev,
+      [itemId]: [...(prev[itemId] ?? []), { price, currency: currency || 'USD', recorded_at: new Date().toISOString() }],
+    }))
+    const supabase = createClient()
+    await supabase.from('price_records').insert({ item_id: itemId, price, currency: currency || 'USD', source: 'auto' })
+  }
+
+  // Re-fetch the current price for a single item and log it to history.
+  async function recheckPrice(item: Item): Promise<boolean> {
+    if (!item.url) return false
+    const meta = await fetchMeta(item.url)
+    if (!meta || meta.error || !meta.price) return false
+    const n = parseFloat(meta.price)
+    if (isNaN(n) || n <= 0) return false
+    const currency = meta.currency || item.auto_currency || 'USD'
+    const patch: Partial<Item> = { auto_price: n, auto_currency: currency }
+    if (meta.image?.startsWith('http') && !item.image_url) patch.image_url = meta.image
+    await patchItem(item.id, patch)
+    await recordPrice(item.id, n, currency)
+    return true
   }
 
   function copyToClipboard() {
@@ -228,6 +268,10 @@ export default function WishlistDetailClient({
           <div className="space-y-2 mb-4">
             <input value={listName} onChange={e => setListName(e.target.value)} className={INPUT} style={RING} placeholder="List name" autoFocus onKeyDown={e => e.key === 'Enter' && saveListName()} />
             <input value={listDesc} onChange={e => setListDesc(e.target.value)} className={INPUT} style={RING} placeholder="Description (optional)" />
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-ghost text-sm">$</span>
+              <input value={budgetInput} onChange={e => setBudgetInput(e.target.value)} type="number" min="0" step="0.01" className={`${INPUT} pl-7`} style={RING} placeholder="Budget for this list (optional)" onKeyDown={e => e.key === 'Enter' && saveListName()} />
+            </div>
             <div className="flex gap-2">
               <button onClick={saveListName} className="px-3 py-1.5 text-sm rounded-lg spring" style={{ background:'var(--a600)', color:'var(--a-on)' }}>Save</button>
               <button onClick={() => setEditingListName(false)} className="px-3 py-1.5 text-sm rounded-lg bg-raised text-dim hover:text-ink spring">Cancel</button>
@@ -251,6 +295,16 @@ export default function WishlistDetailClient({
               </button>
             </div>
           </div>
+        )}
+
+        {/* ── Budget meter ── */}
+        {settings.showBudget && budget != null && budget > 0 && (
+          <BudgetMeter
+            budget={budget}
+            committed={totalBase}
+            spent={purchased.reduce((s, i) => s + itemTotal(i), 0)}
+            currency="USD"
+          />
         )}
 
         {/* ── Toolbar ── */}
@@ -330,7 +384,7 @@ export default function WishlistDetailClient({
 
       {/* ── Add item form ── */}
       {showAddForm && (
-        <AddItemForm wishlistId={wishlist.id} onAdd={item => { setItems(p => [item, ...p]); setShowAddForm(false) }} onCancel={() => setShowAddForm(false)} />
+        <AddItemForm wishlistId={wishlist.id} onAdd={item => { setItems(p => [item, ...p]); if (item.auto_price) recordPrice(item.id, item.auto_price, item.auto_currency); setShowAddForm(false) }} onCancel={() => setShowAddForm(false)} />
       )}
 
       {/* ── Want section ── */}
@@ -339,8 +393,8 @@ export default function WishlistDetailClient({
       ) : (
         <div className={view === 'card' ? 'grid gap-3 sm:grid-cols-2' : 'space-y-1.5'}>
           {filtered.map(item => view === 'card'
-            ? <CardItem key={item.id} item={item} onEdit={setEditingItem} onDelete={deleteItem} onTogglePurchased={togglePurchased} onPatch={patchItem} onMove={() => setMovingItem(item)} />
-            : <RowItem   key={item.id} item={item} onEdit={setEditingItem} onDelete={deleteItem} onTogglePurchased={togglePurchased} onPatch={patchItem} onMove={() => setMovingItem(item)} />
+            ? <CardItem key={item.id} item={item} history={history[item.id] ?? []} onRecheck={recheckPrice} onEdit={setEditingItem} onDelete={deleteItem} onTogglePurchased={togglePurchased} onPatch={patchItem} onMove={() => setMovingItem(item)} />
+            : <RowItem   key={item.id} item={item} history={history[item.id] ?? []} onRecheck={recheckPrice} onEdit={setEditingItem} onDelete={deleteItem} onTogglePurchased={togglePurchased} onPatch={patchItem} onMove={() => setMovingItem(item)} />
           )}
         </div>
       )}
@@ -359,7 +413,7 @@ export default function WishlistDetailClient({
             <div className="space-y-1.5">
               {purchased.map(item => (
                 <div key={item.id} className="purchased-item">
-                  <RowItem item={item} onEdit={setEditingItem} onDelete={deleteItem} onTogglePurchased={togglePurchased} onPatch={patchItem} onMove={() => setMovingItem(item)} />
+                  <RowItem item={item} history={history[item.id] ?? []} onRecheck={recheckPrice} onEdit={setEditingItem} onDelete={deleteItem} onTogglePurchased={togglePurchased} onPatch={patchItem} onMove={() => setMovingItem(item)} />
                 </div>
               ))}
             </div>
@@ -381,8 +435,9 @@ export default function WishlistDetailClient({
 }
 
 /* ─── Card view item ─────────────────────────────────────────── */
-function CardItem({ item, onEdit, onDelete, onTogglePurchased, onPatch, onMove }: {
-  item: Item; onEdit: (i: Item) => void; onDelete: (id: string) => void
+function CardItem({ item, history, onRecheck, onEdit, onDelete, onTogglePurchased, onPatch, onMove }: {
+  item: Item; history: PriceRecord[]; onRecheck: (i: Item) => Promise<boolean>
+  onEdit: (i: Item) => void; onDelete: (id: string) => void
   onTogglePurchased: (i: Item) => void; onPatch: (id: string, p: Partial<Item>) => void
   onMove: () => void
 }) {
@@ -446,11 +501,16 @@ function CardItem({ item, onEdit, onDelete, onTogglePurchased, onPatch, onMove }
           )}
 
           {price > 0 && (
-            <div className="mt-1">
-              <TaxPrice price={price * (item.quantity ?? 1)} variant="card" />
-              {(item.quantity ?? 1) > 1 && <span className="text-xs text-ghost">×{item.quantity} qty</span>}
+            <div className="mt-1 flex items-center justify-between gap-2">
+              <span>
+                <TaxPrice price={price * (item.quantity ?? 1)} variant="card" />
+                {(item.quantity ?? 1) > 1 && <span className="text-xs text-ghost">×{item.quantity} qty</span>}
+              </span>
+              {item.url && <RecheckButton onClick={() => onRecheck(item)} />}
             </div>
           )}
+
+          <PriceInsights current={item.auto_price} target={item.target_price} currency={item.auto_currency ?? 'USD'} history={history} />
 
           {item.notes && <p className="text-xs text-dim mt-1 line-clamp-1">{item.notes}</p>}
 
@@ -476,8 +536,9 @@ function CardItem({ item, onEdit, onDelete, onTogglePurchased, onPatch, onMove }
 }
 
 /* ─── Compact / row item ─────────────────────────────────────── */
-function RowItem({ item, onEdit, onDelete, onTogglePurchased, onPatch, onMove }: {
-  item: Item; onEdit: (i: Item) => void; onDelete: (id: string) => void
+function RowItem({ item, history, onRecheck, onEdit, onDelete, onTogglePurchased, onPatch, onMove }: {
+  item: Item; history: PriceRecord[]; onRecheck: (i: Item) => Promise<boolean>
+  onEdit: (i: Item) => void; onDelete: (id: string) => void
   onTogglePurchased: (i: Item) => void; onPatch: (id: string, p: Partial<Item>) => void
   onMove: () => void
 }) {
@@ -531,6 +592,7 @@ function RowItem({ item, onEdit, onDelete, onTogglePurchased, onPatch, onMove }:
               <span className="text-xs text-ghost">{item.tags.map(t => `#${t}`).join(' ')}</span>
             )}
           </div>
+          <PriceInsights current={item.auto_price} target={item.target_price} currency={item.auto_currency ?? 'USD'} history={history} compact />
         </div>
 
         <StarRating value={item.star_rating} onChange={v => onPatch(item.id, { star_rating: v })} />
@@ -539,6 +601,7 @@ function RowItem({ item, onEdit, onDelete, onTogglePurchased, onPatch, onMove }:
 
         {/* Actions (hover) */}
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 touch:opacity-100 transition-opacity">
+          {item.url && <RecheckButton onClick={() => onRecheck(item)} className="mr-0.5" />}
           <button onClick={() => onEdit(item)} className="p-1 text-ghost hover:text-ink spring"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg></button>
           <button onClick={onMove} className="p-1 text-ghost hover:text-ink spring"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg></button>
           <button onClick={() => onDelete(item.id)} className="p-1 text-ghost hover:text-red-400 spring"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg></button>

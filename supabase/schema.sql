@@ -25,8 +25,11 @@ create table if not exists public.wishlists (
   description text,
   emoji       text,
   archived    boolean not null default false,
+  budget      numeric(12, 2),
   created_at  timestamptz not null default now()
 );
+-- For databases created before `budget` existed:
+alter table public.wishlists add column if not exists budget numeric(12, 2);
 
 create table if not exists public.wishlist_items (
   id            uuid primary key default gen_random_uuid(),
@@ -46,6 +49,19 @@ create table if not exists public.wishlist_items (
   created_at    timestamptz not null default now()
 );
 
+-- Price history: one row per observed price for an item, used for the
+-- sparkline, "lowest ever" and price-drop insights. Rows are appended whenever
+-- a price is captured (add / re-check / manual edit). Ownership is inherited
+-- through the item's parent wishlist.
+create table if not exists public.price_records (
+  id          uuid primary key default gen_random_uuid(),
+  item_id     uuid not null references public.wishlist_items (id) on delete cascade,
+  price       numeric(12, 2) not null,
+  currency    text not null default 'USD',
+  source      text,  -- 'manual' | 'auto' | 'capture' | 'serpapi'
+  recorded_at timestamptz not null default now()
+);
+
 -- Per-user settings, including the optional SerpApi key used by the
 -- "search by name" price-lookup mode. One row per user.
 create table if not exists public.profiles (
@@ -57,14 +73,37 @@ create table if not exists public.profiles (
 -- ─── Indexes ───────────────────────────────────────────────────────────────
 -- Speeds up the per-user list query and the per-list items query.
 
-create index if not exists wishlists_user_id_idx        on public.wishlists (user_id);
-create index if not exists wishlist_items_wishlist_id_idx on public.wishlist_items (wishlist_id);
+create index if not exists wishlists_user_id_idx          on public.wishlists (user_id);
+create index if not exists wishlist_items_wishlist_id_idx  on public.wishlist_items (wishlist_id);
+create index if not exists price_records_item_id_idx       on public.price_records (item_id, recorded_at);
 
 -- ─── Row Level Security ──────────────────────────────────────────────────────
 
 alter table public.wishlists      enable row level security;
 alter table public.wishlist_items enable row level security;
+alter table public.price_records  enable row level security;
 alter table public.profiles       enable row level security;
+
+-- Price records: ownership inherited through the item's parent wishlist.
+drop policy if exists "price_records_select_own" on public.price_records;
+create policy "price_records_select_own" on public.price_records
+  for select using (
+    exists (
+      select 1 from public.wishlist_items i
+      join public.wishlists w on w.id = i.wishlist_id
+      where i.id = price_records.item_id and w.user_id = auth.uid()
+    )
+  );
+
+drop policy if exists "price_records_insert_own" on public.price_records;
+create policy "price_records_insert_own" on public.price_records
+  for insert with check (
+    exists (
+      select 1 from public.wishlist_items i
+      join public.wishlists w on w.id = i.wishlist_id
+      where i.id = price_records.item_id and w.user_id = auth.uid()
+    )
+  );
 
 -- Profiles: a user may only read/write their own row.
 drop policy if exists "profiles_select_own" on public.profiles;
