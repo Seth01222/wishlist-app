@@ -264,7 +264,7 @@ function ListCard({ list, stats, onEdit, onDelete, onArchive }: {
   return (
     <TiltCard className="group relative bg-card border border-line rounded-2xl p-5 hover:border-[var(--a200)] transition-colors">
       {/* Actions (on hover) */}
-      <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 touch:opacity-100 transition-opacity">
         <button onClick={() => onEdit(list)} title="Edit list"
           className="p-1.5 rounded-lg text-ghost hover:text-ink hover:bg-raised spring">
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>

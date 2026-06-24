@@ -420,7 +420,7 @@ function CardItem({ item, onEdit, onDelete, onTogglePurchased, onPatch, onMove }
           }
           {/* Refresh overlay on existing image */}
           {item.image_url && !imgErr && item.url && (
-            <button onClick={refreshImage} disabled={fetchingImg} title="Re-fetch image" className="absolute inset-0 bg-black/0 hover:bg-black/40 flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-all spring">
+            <button onClick={refreshImage} disabled={fetchingImg} title="Re-fetch image" className="absolute inset-0 bg-black/0 hover:bg-black/40 touch:bg-black/25 flex items-center justify-center opacity-0 group-hover/img:opacity-100 touch:opacity-100 transition-all spring">
               <svg className={`w-5 h-5 text-white drop-shadow ${fetchingImg ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
             </button>
           )}
@@ -430,7 +430,7 @@ function CardItem({ item, onEdit, onDelete, onTogglePurchased, onPatch, onMove }
         <div className="flex-1 p-4 min-w-0">
           <div className="flex items-start justify-between gap-2 mb-1">
             <h3 className="font-semibold text-ink text-sm leading-snug line-clamp-2">{item.name}</h3>
-            <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 touch:opacity-100 transition-opacity">
               <button onClick={() => onEdit(item)} className="p-1 rounded text-ghost hover:text-ink spring" title="Edit"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg></button>
               <button onClick={onMove} className="p-1 rounded text-ghost hover:text-ink spring" title="Move to list"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg></button>
               <button onClick={() => onDelete(item.id)} className="p-1 rounded text-ghost hover:text-red-400 spring" title="Delete"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg></button>
@@ -538,7 +538,7 @@ function RowItem({ item, onEdit, onDelete, onTogglePurchased, onPatch, onMove }:
         {price > 0 && <TaxPrice price={price * (item.quantity ?? 1)} variant="row" className="shrink-0" />}
 
         {/* Actions (hover) */}
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 touch:opacity-100 transition-opacity">
           <button onClick={() => onEdit(item)} className="p-1 text-ghost hover:text-ink spring"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg></button>
           <button onClick={onMove} className="p-1 text-ghost hover:text-ink spring"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg></button>
           <button onClick={() => onDelete(item.id)} className="p-1 text-ghost hover:text-red-400 spring"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg></button>
