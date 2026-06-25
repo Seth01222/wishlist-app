@@ -13,6 +13,10 @@ import { type PriceRecord } from '@/lib/price'
 import PriceInsights from '@/components/price/PriceInsights'
 import BudgetMeter from '@/components/price/BudgetMeter'
 import RecheckButton from '@/components/price/RecheckButton'
+import StatusControl from '@/components/items/StatusControl'
+import { PriorityBadge, PriorityControl } from '@/components/items/Priority'
+import BulkBar from '@/components/items/BulkBar'
+import { statusOf, STATUS_META, PRIORITY_META, type ItemStatus } from '@/lib/itemMeta'
 
 /* ─── Types ──────────────────────────────────────────────────── */
 type Item = {
@@ -20,13 +24,14 @@ type Item = {
   notes: string | null; target_price: number | null; auto_price: number | null
   auto_currency: string | null; star_rating: number; quantity: number
   purchased: boolean; purchased_at: string | null; tags: string[] | null
+  priority: number; status: string; sort_order: number
   created_at: string
 }
 type Wishlist = { id: string; name: string; description: string | null; budget?: number | null }
 type OtherList = { id: string; name: string; emoji: string | null }
 type FetchedMeta = { title: string | null; image: string | null; price: string | null; currency: string; error?: string }
 type ViewMode = 'card' | 'compact'
-type SortKey = 'date' | 'name' | 'price-asc' | 'price-desc' | 'stars' | 'smart'
+type SortKey = 'date' | 'name' | 'price-asc' | 'price-desc' | 'stars' | 'smart' | 'priority' | 'manual'
 
 /* ─── Helpers ────────────────────────────────────────────────── */
 const fmt = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
@@ -63,6 +68,11 @@ export default function WishlistDetailClient({
   const [sort, setSort] = useState<SortKey>('date')
   const [search, setSearch] = useState('')
   const [filterTags, setFilterTags] = useState<string[]>([])
+  const [filterStatus, setFilterStatus] = useState<ItemStatus | 'all'>('all')
+  const [filterPriority, setFilterPriority] = useState<number | 'all'>('all')
+  const [selectMode, setSelectMode] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [draggingId, setDraggingId] = useState<string | null>(null)
   const [showPurchased, setShowPurchased] = useState(false)
   const [showAddForm, setShowAddForm] = useState(false)
   const [editingItem, setEditingItem] = useState<Item | null>(null)
@@ -103,27 +113,36 @@ export default function WishlistDetailClient({
 
   /* ── Derived values ── */
   const allTags = useMemo(() => [...new Set(items.flatMap(i => i.tags ?? []))].sort(), [items])
-  const unpurchased = items.filter(i => !i.purchased)
-  const purchased   = items.filter(i => i.purchased)
-  const totalBase   = unpurchased.reduce((s, i) => s + itemTotal(i), 0)
+  const active      = items.filter(i => statusOf(i) !== 'got')          // want + saved
+  const purchased   = items.filter(i => statusOf(i) === 'got')
+  const totalBase   = active.reduce((s, i) => s + itemTotal(i), 0)
   const taxMult     = taxEnabled && taxRate > 0 ? 1 + taxRate / 100 : 1
   const totalValue  = totalBase * taxMult
   const totalSpent  = purchased.reduce((s, i) => s + itemTotal(i) * taxMult, 0)
 
+  // Budget-intertwined status totals (pre-tax).
+  const wantTotal  = items.filter(i => statusOf(i) === 'want').reduce((s, i) => s + itemTotal(i), 0)
+  const savedTotal = items.filter(i => statusOf(i) === 'saved').reduce((s, i) => s + itemTotal(i), 0)
+  const gotTotal   = purchased.reduce((s, i) => s + itemTotal(i), 0)
+
   const filtered = useMemo(() => {
-    let r = unpurchased
+    let r = active
     if (search) r = r.filter(i => i.name.toLowerCase().includes(search.toLowerCase()) || i.tags?.some(t => t.toLowerCase().includes(search.toLowerCase())))
     if (filterTags.length) r = r.filter(i => filterTags.every(t => i.tags?.includes(t)))
+    if (filterStatus !== 'all') r = r.filter(i => statusOf(i) === filterStatus)
+    if (filterPriority !== 'all') r = r.filter(i => (i.priority ?? 0) === filterPriority)
     switch (sort) {
       case 'name':       r = [...r].sort((a,b) => a.name.localeCompare(b.name)); break
       case 'price-asc':  r = [...r].sort((a,b) => itemPrice(a) - itemPrice(b)); break
       case 'price-desc': r = [...r].sort((a,b) => itemPrice(b) - itemPrice(a)); break
       case 'stars':      r = [...r].sort((a,b) => b.star_rating - a.star_rating); break
+      case 'priority':   r = [...r].sort((a,b) => (b.priority ?? 0) - (a.priority ?? 0)); break
+      case 'manual':     r = [...r].sort((a,b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)); break
       case 'smart':      r = [...r].sort((a,b) => (b.star_rating*20 - itemPrice(b)/50) - (a.star_rating*20 - itemPrice(a)/50)); break
       default:           r = [...r].sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     }
     return r
-  }, [unpurchased, search, filterTags, sort])
+  }, [active, search, filterTags, filterStatus, filterPriority, sort])
 
   /* ── Supabase mutations ── */
   async function patchItem(id: string, patch: Partial<Item>) {
@@ -132,9 +151,50 @@ export default function WishlistDetailClient({
     await supabase.from('wishlist_items').update(patch).eq('id', id)
   }
 
-  async function togglePurchased(item: Item) {
-    const purchased = !item.purchased
-    await patchItem(item.id, { purchased, purchased_at: purchased ? new Date().toISOString() : null })
+  // Status is the source of truth; keep purchased/purchased_at in sync so all
+  // the existing "got it" logic and stats keep working.
+  function statusPatch(item: Item | null, s: ItemStatus): Partial<Item> {
+    return { status: s, purchased: s === 'got', purchased_at: s === 'got' ? (item?.purchased_at ?? new Date().toISOString()) : null }
+  }
+  async function setStatus(item: Item, s: ItemStatus) {
+    await patchItem(item.id, statusPatch(item, s))
+  }
+
+  /* ── Bulk actions ── */
+  function toggleSelect(id: string) {
+    setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  }
+  function clearSelection() { setSelected(new Set()); setSelectMode(false) }
+
+  async function bulkApply(patchFor: (i: Item) => Partial<Item>, remove = false) {
+    const ids = [...selected]
+    if (ids.length === 0) return
+    if (remove) setItems(prev => prev.filter(i => !ids.includes(i.id)))
+    else setItems(prev => prev.map(i => ids.includes(i.id) ? { ...i, ...patchFor(i) } : i))
+    const supabase = createClient()
+    await Promise.all(ids.map(id => {
+      const q = supabase.from('wishlist_items')
+      return remove ? q.delete().eq('id', id) : q.update(patchFor(items.find(x => x.id === id) ?? ({} as Item))).eq('id', id)
+    }))
+    clearSelection()
+  }
+  const bulkStatus   = (s: ItemStatus) => bulkApply(i => statusPatch(i, s))
+  const bulkPriority = (p: number) => bulkApply(() => ({ priority: p }))
+  const bulkMove     = (listId: string) => bulkApply(() => ({ wishlist_id: listId } as Partial<Item>), true)
+  const bulkDelete   = () => { if (confirm(`Delete ${selected.size} item(s)?`)) bulkApply(() => ({}), true) }
+
+  /* ── Drag-to-reorder (manual sort) ── */
+  async function handleDrop(targetId: string) {
+    if (!draggingId || draggingId === targetId) { setDraggingId(null); return }
+    const order = filtered.map(i => i.id)
+    const from = order.indexOf(draggingId), to = order.indexOf(targetId)
+    if (from < 0 || to < 0) { setDraggingId(null); return }
+    order.splice(to, 0, order.splice(from, 1)[0])
+    const pos = new Map(order.map((id, idx) => [id, idx]))
+    setItems(prev => prev.map(i => pos.has(i.id) ? { ...i, sort_order: pos.get(i.id)! } : i))
+    setDraggingId(null)
+    const supabase = createClient()
+    await Promise.all(order.map((id, idx) => supabase.from('wishlist_items').update({ sort_order: idx }).eq('id', id)))
   }
 
   async function deleteItem(id: string) {
@@ -191,7 +251,7 @@ export default function WishlistDetailClient({
     const lines = [
       `📋 ${listName}`,
       listDesc ? `${listDesc}\n` : '',
-      ...unpurchased.map(i => {
+      ...active.map(i => {
         const price = itemPrice(i) ? ` — ${fmt(itemPrice(i))}` : ''
         const qty   = (i.quantity ?? 1) > 1 ? ` (x${i.quantity})` : ''
         const stars = i.star_rating ? ' ' + '★'.repeat(i.star_rating) : ''
@@ -299,12 +359,7 @@ export default function WishlistDetailClient({
 
         {/* ── Budget meter ── */}
         {settings.showBudget && budget != null && budget > 0 && (
-          <BudgetMeter
-            budget={budget}
-            committed={totalBase}
-            spent={purchased.reduce((s, i) => s + itemTotal(i), 0)}
-            currency="USD"
-          />
+          <BudgetMeter budget={budget} want={wantTotal} saved={savedTotal} spent={gotTotal} currency="USD" />
         )}
 
         {/* ── Toolbar ── */}
@@ -322,7 +377,9 @@ export default function WishlistDetailClient({
             <option value="stars">Stars</option>
             <option value="price-asc">Price ↑</option>
             <option value="price-desc">Price ↓</option>
+            <option value="priority">Priority</option>
             <option value="smart">Smart sort</option>
+            <option value="manual">Manual order</option>
           </select>
 
           {/* View toggle */}
@@ -342,6 +399,13 @@ export default function WishlistDetailClient({
           {/* Copy */}
           <button onClick={copyToClipboard} title="Copy list to clipboard" className="p-2 rounded-lg bg-raised text-dim hover:text-ink spring">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+          </button>
+
+          {/* Select (bulk) */}
+          <button onClick={() => { setSelectMode(m => !m); setSelected(new Set()) }} title="Select multiple"
+            className={`px-3 py-1.5 text-sm rounded-lg spring font-medium ${selectMode ? 'text-[var(--a-on)]' : 'bg-raised text-dim hover:text-ink'}`}
+            style={selectMode ? { background: 'var(--a600)' } : {}}>
+            {selectMode ? 'Done' : 'Select'}
           </button>
         </div>
 
@@ -380,6 +444,25 @@ export default function WishlistDetailClient({
             )}
           </div>
         )}
+
+        {/* Status + priority filters */}
+        <div className="flex flex-wrap items-center gap-1.5 mt-2">
+          {(['all', 'want', 'saved'] as const).map(s => (
+            <button key={s} onClick={() => setFilterStatus(s)}
+              className={`px-2.5 py-0.5 text-xs rounded-full border spring ${filterStatus === s ? 'text-[var(--a-on)] border-transparent' : 'border-line bg-raised text-dim hover:text-ink'}`}
+              style={filterStatus === s ? { background: s === 'all' ? 'var(--a600)' : STATUS_META[s].dot } : {}}>
+              {s === 'all' ? 'All' : STATUS_META[s].label}
+            </button>
+          ))}
+          <span className="w-px h-4 bg-line mx-0.5" />
+          {([['all', 'Any'], [3, 'High'], [2, 'Med'], [1, 'Low']] as const).map(([p, label]) => (
+            <button key={String(p)} onClick={() => setFilterPriority(p === 'all' ? 'all' : (p as number))}
+              className={`px-2.5 py-0.5 text-xs rounded-full border spring ${filterPriority === p ? 'text-[var(--a-on)] border-transparent' : 'border-line bg-raised text-dim hover:text-ink'}`}
+              style={filterPriority === p ? { background: p === 'all' ? 'var(--a600)' : PRIORITY_META[p as number].color } : {}}>
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* ── Add item form ── */}
@@ -392,11 +475,28 @@ export default function WishlistDetailClient({
         <EmptyState onAdd={() => setShowAddForm(true)} hasSearch={!!search || filterTags.length > 0} />
       ) : (
         <div className={view === 'card' ? 'grid gap-3 sm:grid-cols-2' : 'space-y-1.5'}>
-          {filtered.map(item => view === 'card'
-            ? <CardItem key={item.id} item={item} history={history[item.id] ?? []} onRecheck={recheckPrice} onEdit={setEditingItem} onDelete={deleteItem} onTogglePurchased={togglePurchased} onPatch={patchItem} onMove={() => setMovingItem(item)} />
-            : <RowItem   key={item.id} item={item} history={history[item.id] ?? []} onRecheck={recheckPrice} onEdit={setEditingItem} onDelete={deleteItem} onTogglePurchased={togglePurchased} onPatch={patchItem} onMove={() => setMovingItem(item)} />
-          )}
+          {filtered.map(item => {
+            const common = { item, history: history[item.id] ?? [], onRecheck: recheckPrice, onEdit: setEditingItem, onDelete: deleteItem, onStatus: setStatus, onPatch: patchItem, onMove: () => setMovingItem(item), selectMode, isSelected: selected.has(item.id), onToggleSelect: toggleSelect }
+            const canDrag = sort === 'manual' && !selectMode
+            return (
+              <div key={item.id}
+                draggable={canDrag}
+                onDragStart={canDrag ? () => setDraggingId(item.id) : undefined}
+                onDragOver={canDrag ? (e => e.preventDefault()) : undefined}
+                onDrop={canDrag ? (() => handleDrop(item.id)) : undefined}
+                onDragEnd={canDrag ? (() => setDraggingId(null)) : undefined}
+                className={canDrag ? `cursor-move ${draggingId === item.id ? 'opacity-40' : ''}` : ''}
+              >
+                {view === 'card' ? <CardItem {...common} /> : <RowItem {...common} />}
+              </div>
+            )
+          })}
         </div>
+      )}
+
+      {/* Manual-order hint */}
+      {sort === 'manual' && !selectMode && filtered.length > 1 && (
+        <p className="text-xs text-ghost mt-2">↕ Drag items to reorder them.</p>
       )}
 
       {/* ── Got it section ── */}
@@ -413,7 +513,7 @@ export default function WishlistDetailClient({
             <div className="space-y-1.5">
               {purchased.map(item => (
                 <div key={item.id} className="purchased-item">
-                  <RowItem item={item} history={history[item.id] ?? []} onRecheck={recheckPrice} onEdit={setEditingItem} onDelete={deleteItem} onTogglePurchased={togglePurchased} onPatch={patchItem} onMove={() => setMovingItem(item)} />
+                  <RowItem item={item} history={history[item.id] ?? []} onRecheck={recheckPrice} onEdit={setEditingItem} onDelete={deleteItem} onStatus={setStatus} onPatch={patchItem} onMove={() => setMovingItem(item)} selectMode={selectMode} isSelected={selected.has(item.id)} onToggleSelect={toggleSelect} />
                 </div>
               ))}
             </div>
@@ -430,16 +530,30 @@ export default function WishlistDetailClient({
       {movingItem && (
         <MoveModal item={movingItem} lists={otherLists.filter(l => l.id !== wishlist.id)} onMove={moveItem} onClose={() => setMovingItem(null)} />
       )}
+
+      {/* ── Bulk action bar ── */}
+      {selectMode && selected.size > 0 && (
+        <BulkBar
+          count={selected.size}
+          lists={otherLists.filter(l => l.id !== wishlist.id)}
+          onStatus={bulkStatus}
+          onPriority={bulkPriority}
+          onMove={bulkMove}
+          onDelete={bulkDelete}
+          onClear={clearSelection}
+        />
+      )}
     </div>
   )
 }
 
 /* ─── Card view item ─────────────────────────────────────────── */
-function CardItem({ item, history, onRecheck, onEdit, onDelete, onTogglePurchased, onPatch, onMove }: {
+function CardItem({ item, history, onRecheck, onEdit, onDelete, onStatus, onPatch, onMove, selectMode, isSelected, onToggleSelect }: {
   item: Item; history: PriceRecord[]; onRecheck: (i: Item) => Promise<boolean>
   onEdit: (i: Item) => void; onDelete: (id: string) => void
-  onTogglePurchased: (i: Item) => void; onPatch: (id: string, p: Partial<Item>) => void
+  onStatus: (i: Item, s: ItemStatus) => void; onPatch: (id: string, p: Partial<Item>) => void
   onMove: () => void
+  selectMode: boolean; isSelected: boolean; onToggleSelect: (id: string) => void
 }) {
   const [imgErr, setImgErr] = useState(false)
   const [fetchingImg, setFetchingImg] = useState(false)
@@ -460,7 +574,13 @@ function CardItem({ item, history, onRecheck, onEdit, onDelete, onTogglePurchase
   const price = itemPrice(item)
 
   return (
-    <TiltCard className="bg-card border border-line rounded-2xl overflow-hidden hover:border-[var(--a200)] group">
+    <TiltCard className={`bg-card border rounded-2xl overflow-hidden hover:border-[var(--a200)] group ${isSelected ? 'border-[var(--a500)] ring-2 ring-[var(--a500)]' : 'border-line'}`}>
+      {selectMode && (
+        <button onClick={() => onToggleSelect(item.id)} className="absolute top-2 left-2 z-20 w-6 h-6 rounded-md flex items-center justify-center border-2 shadow-sm spring"
+          style={isSelected ? { background: 'var(--a600)', borderColor: 'var(--a600)' } : { background: 'var(--card)', borderColor: 'var(--line)' }}>
+          {isSelected && <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7"/></svg>}
+        </button>
+      )}
       <div className="flex">
         {/* Image */}
         <div className="w-28 shrink-0 bg-raised flex items-center justify-center overflow-hidden min-h-[120px] relative group/img">
@@ -484,7 +604,10 @@ function CardItem({ item, history, onRecheck, onEdit, onDelete, onTogglePurchase
         {/* Content */}
         <div className="flex-1 p-4 min-w-0">
           <div className="flex items-start justify-between gap-2 mb-1">
-            <h3 className="font-semibold text-ink text-sm leading-snug line-clamp-2">{item.name}</h3>
+            <div className="min-w-0">
+              {item.priority > 0 && <div className="mb-1"><PriorityBadge p={item.priority} /></div>}
+              <h3 className="font-semibold text-ink text-sm leading-snug line-clamp-2">{item.name}</h3>
+            </div>
             <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 touch:opacity-100 transition-opacity">
               <button onClick={() => onEdit(item)} className="p-1 rounded text-ghost hover:text-ink spring" title="Edit"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg></button>
               <button onClick={onMove} className="p-1 rounded text-ghost hover:text-ink spring" title="Move to list"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg></button>
@@ -520,14 +643,9 @@ function CardItem({ item, history, onRecheck, onEdit, onDelete, onTogglePurchase
             </div>
           )}
 
-          <div className="flex items-center justify-between mt-2">
-            {item.url
-              ? <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-xs font-medium spring" style={{ color:'var(--a500)' }}>View ↗</a>
-              : <span />
-            }
-            <button onClick={() => onTogglePurchased(item)} className={`text-xs px-2.5 py-1 rounded-full spring font-medium ${item.purchased ? 'bg-emerald-500/15 text-emerald-400' : 'bg-raised text-ghost hover:text-ink'}`}>
-              {item.purchased ? '✓ Got it' : 'Mark got it'}
-            </button>
+          <div className="flex items-center justify-between gap-2 mt-2.5">
+            <StatusControl value={statusOf(item)} onChange={s => onStatus(item, s)} />
+            {item.url && <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-xs font-medium spring shrink-0" style={{ color:'var(--a500)' }}>View ↗</a>}
           </div>
         </div>
       </div>
@@ -536,16 +654,19 @@ function CardItem({ item, history, onRecheck, onEdit, onDelete, onTogglePurchase
 }
 
 /* ─── Compact / row item ─────────────────────────────────────── */
-function RowItem({ item, history, onRecheck, onEdit, onDelete, onTogglePurchased, onPatch, onMove }: {
+function RowItem({ item, history, onRecheck, onEdit, onDelete, onStatus, onPatch, onMove, selectMode, isSelected, onToggleSelect }: {
   item: Item; history: PriceRecord[]; onRecheck: (i: Item) => Promise<boolean>
   onEdit: (i: Item) => void; onDelete: (id: string) => void
-  onTogglePurchased: (i: Item) => void; onPatch: (id: string, p: Partial<Item>) => void
+  onStatus: (i: Item, s: ItemStatus) => void; onPatch: (id: string, p: Partial<Item>) => void
   onMove: () => void
+  selectMode: boolean; isSelected: boolean; onToggleSelect: (id: string) => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [swipeX, setSwipeX] = useState(0)
   const touchStart = useRef(0)
   const price = itemPrice(item)
+  const st = statusOf(item)
+  const cycleStatus = () => onStatus(item, st === 'want' ? 'saved' : st === 'saved' ? 'got' : 'want')
 
   function onTouchStart(e: React.TouchEvent) { touchStart.current = e.touches[0].clientX }
   function onTouchMove(e: React.TouchEvent) {
@@ -563,8 +684,16 @@ function RowItem({ item, history, onRecheck, onEdit, onDelete, onTogglePurchased
       <div className="swipe-action" style={{ transform: swipeX < -20 ? 'translateX(0)' : 'translateX(100%)', borderRadius: '0 12px 12px 0' }}>
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
       </div>
-      <div className="swipe-content bg-card border border-line rounded-xl px-3 py-2.5 flex items-center gap-3 group hover:border-[var(--a200)] transition-colors"
+      <div className={`swipe-content bg-card border rounded-xl px-3 py-2.5 flex items-center gap-3 group transition-colors ${isSelected ? 'border-[var(--a500)] ring-1 ring-[var(--a500)]' : 'border-line hover:border-[var(--a200)]'}`}
         style={{ transform: `translateX(${swipeX}px)` }}>
+
+        {/* Select checkbox (bulk mode) */}
+        {selectMode && (
+          <button onClick={() => onToggleSelect(item.id)} className="shrink-0 w-5 h-5 rounded-md border-2 flex items-center justify-center spring"
+            style={isSelected ? { background: 'var(--a600)', borderColor: 'var(--a600)' } : { borderColor: 'var(--line)' }}>
+            {isSelected && <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7"/></svg>}
+          </button>
+        )}
 
         {/* Thumbnail */}
         <div className="w-10 h-10 shrink-0 rounded-lg bg-raised overflow-hidden">
@@ -574,14 +703,20 @@ function RowItem({ item, history, onRecheck, onEdit, onDelete, onTogglePurchased
           }
         </div>
 
-        {/* Check */}
-        <button onClick={() => onTogglePurchased(item)} className={`shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center spring ${item.purchased ? 'border-emerald-400 bg-emerald-400' : 'border-ghost hover:border-[var(--a500)]'}`}>
-          {item.purchased && <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7"/></svg>}
+        {/* Status cycle (Want → Saved → Got) */}
+        <button onClick={cycleStatus} title={`${STATUS_META[st].label} — click to change`}
+          className={`shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center spring ${st === 'got' ? 'bg-emerald-400 border-emerald-400' : st === 'saved' ? 'border-amber-400' : 'border-ghost hover:border-[var(--a500)]'}`}
+          style={st === 'saved' ? { background: 'color-mix(in oklab, #f59e0b 22%, transparent)' } : {}}>
+          {st === 'got' && <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7"/></svg>}
+          {st === 'saved' && <span className="text-[9px]">💰</span>}
         </button>
 
         {/* Name */}
         <div className="flex-1 min-w-0">
-          <span className={`text-sm font-medium text-ink truncate block ${item.purchased ? 'line-through text-dim' : ''}`}>{item.name}</span>
+          <div className="flex items-center gap-1.5">
+            {item.priority > 0 && <PriorityBadge p={item.priority} />}
+            <span className={`text-sm font-medium text-ink truncate ${st === 'got' ? 'line-through text-dim' : ''}`}>{item.name}</span>
+          </div>
           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
             {retailerName(item.url) && (
               <span className="text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded bg-raised text-ghost">
@@ -623,6 +758,7 @@ function AddItemForm({ wishlistId, onAdd, onCancel }: {
   const [qty, setQty] = useState('1')
   const [tags, setTags] = useState('')
   const [stars, setStars] = useState(0)
+  const [priority, setPriority] = useState(0)
   const [fetching, setFetching] = useState(false)
   const [fetchNote, setFetchNote] = useState<string | null>(null)
   const [fetchedMeta, setFetchedMeta] = useState<FetchedMeta | null>(null)
@@ -666,6 +802,8 @@ function AddItemForm({ wishlistId, onAdd, onCancel }: {
       auto_currency: fetchedMeta?.currency ?? null,
       quantity: parseInt(qty) || 1,
       star_rating: stars,
+      priority,
+      status: 'want',
       tags: tags.trim() ? tags.split(',').map(t => t.trim().toLowerCase().replace(/^#/, '')).filter(Boolean) : null,
     }).select().single()
     if (error) { setError(error.message); setLoading(false) }
@@ -715,11 +853,17 @@ function AddItemForm({ wishlistId, onAdd, onCancel }: {
             <input type="number" min="1" value={qty} onChange={e => setQty(e.target.value)} className={`${INPUT} mt-1`} style={RING} />
           </div>
           <div>
-            <label className="text-sm font-medium text-ink">Priority</label>
+            <label className="text-sm font-medium text-ink">Rating</label>
             <div className="mt-2.5">
               <StarRating value={stars} onChange={setStars} size="md" />
             </div>
           </div>
+        </div>
+
+        {/* Priority */}
+        <div>
+          <label className="text-sm font-medium text-ink">Priority</label>
+          <div className="mt-1.5"><PriorityControl value={priority} onChange={setPriority} /></div>
         </div>
 
         {/* Notes / Tags */}
@@ -756,6 +900,7 @@ function EditItemModal({ item, onSave, onClose }: {
   const [price, setPrice] = useState(String(item.target_price ?? item.auto_price ?? ''))
   const [qty, setQty] = useState(String(item.quantity ?? 1))
   const [stars, setStars] = useState(item.star_rating ?? 0)
+  const [priority, setPriority] = useState(item.priority ?? 0)
   const [tags, setTags] = useState((item.tags ?? []).join(', '))
   const [loading, setLoading] = useState(false)
 
@@ -765,7 +910,7 @@ function EditItemModal({ item, onSave, onClose }: {
       name: name.trim(), url: url.trim() || null, image_url: imageUrl.trim() || null,
       notes: notes.trim() || null,
       target_price: price ? parseFloat(price) : null,
-      quantity: parseInt(qty) || 1, star_rating: stars,
+      quantity: parseInt(qty) || 1, star_rating: stars, priority,
       tags: tags.trim() ? tags.split(',').map(t => t.trim().toLowerCase().replace(/^#/, '')).filter(Boolean) : null,
     })
     setLoading(false)
@@ -809,6 +954,10 @@ function EditItemModal({ item, onSave, onClose }: {
               <label className="text-sm font-medium text-ink">Stars</label>
               <div className="mt-2.5"><StarRating value={stars} onChange={setStars} size="md" /></div>
             </div>
+          </div>
+          <div>
+            <label className="text-sm font-medium text-ink">Priority</label>
+            <div className="mt-1.5"><PriorityControl value={priority} onChange={setPriority} /></div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

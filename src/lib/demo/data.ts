@@ -8,6 +8,16 @@ const img = (id: string) =>
 // Build an ISO timestamp `daysAgo` days before now, so "sort by date" looks real.
 const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString()
 
+export type DemoCollection = {
+  id: string
+  name: string
+  emoji: string | null
+  description: string | null
+  color: string | null
+  sort_order: number
+  created_at: string
+}
+
 export type DemoWishlist = {
   id: string
   name: string
@@ -15,8 +25,16 @@ export type DemoWishlist = {
   emoji: string | null
   archived: boolean
   budget: number | null
+  collection_id: string | null
+  sort_order: number
   created_at: string
 }
+
+const COLLECTIONS: DemoCollection[] = [
+  { id: 'col-personal', name: 'Personal',     emoji: '🙋', description: 'Stuff for me',          color: 'indigo',  sort_order: 0, created_at: daysAgo(40) },
+  { id: 'col-home',     name: 'Home',         emoji: '🏡', description: 'For the apartment',     color: 'emerald', sort_order: 1, created_at: daysAgo(40) },
+  { id: 'col-fun',      name: 'Fun & Gifts',  emoji: '🎉', description: 'Gifts, games & treats', color: 'amber',   sort_order: 2, created_at: daysAgo(40) },
+]
 
 export type DemoPriceRecord = {
   id: string
@@ -42,15 +60,18 @@ export type DemoItem = {
   purchased: boolean
   purchased_at: string | null
   tags: string[] | null
+  priority?: number
+  status?: string
+  sort_order?: number
   created_at: string
 }
 
 const WISHLISTS: DemoWishlist[] = [
-  { id: 'list-tech',    name: 'Tech & Gadgets',    description: 'Upgrades for my desk setup',          emoji: '🎧', archived: false, budget: 1200, created_at: daysAgo(2) },
-  { id: 'list-wardrobe',name: 'Wardrobe Refresh',  description: 'Spring clothing haul',                 emoji: '👟', archived: false, budget: 650,  created_at: daysAgo(9) },
-  { id: 'list-birthday',name: 'Birthday Wishlist',  description: 'Ideas for friends & family to grab',   emoji: '🎂', archived: false, budget: 150,  created_at: daysAgo(15) },
-  { id: 'list-home',    name: 'Home & Kitchen',     description: 'Making the apartment nicer',           emoji: '🏠', archived: false, budget: 800,  created_at: daysAgo(28) },
-  { id: 'list-gaming',  name: 'Gaming Setup',       description: 'Saved for later — already finished!',  emoji: '🎮', archived: true,  budget: 1500, created_at: daysAgo(60) },
+  { id: 'list-tech',    name: 'Tech & Gadgets',    description: 'Upgrades for my desk setup',          emoji: '🎧', archived: false, budget: 1200, collection_id: 'col-personal', sort_order: 0, created_at: daysAgo(2) },
+  { id: 'list-wardrobe',name: 'Wardrobe Refresh',  description: 'Spring clothing haul',                 emoji: '👟', archived: false, budget: 650,  collection_id: 'col-personal', sort_order: 1, created_at: daysAgo(9) },
+  { id: 'list-birthday',name: 'Birthday Wishlist',  description: 'Ideas for friends & family to grab',   emoji: '🎂', archived: false, budget: 150,  collection_id: 'col-fun',      sort_order: 0, created_at: daysAgo(15) },
+  { id: 'list-home',    name: 'Home & Kitchen',     description: 'Making the apartment nicer',           emoji: '🏠', archived: false, budget: 800,  collection_id: 'col-home',     sort_order: 0, created_at: daysAgo(28) },
+  { id: 'list-gaming',  name: 'Gaming Setup',       description: 'Saved for later — already finished!',  emoji: '🎮', archived: true,  budget: 1500, collection_id: 'col-fun',      sort_order: 1, created_at: daysAgo(60) },
 ]
 
 const ITEMS: DemoItem[] = [
@@ -184,6 +205,11 @@ const HISTORY: Record<string, DemoPriceRecord[]> = (() => {
 
 /* ── Selectors that match each page's Supabase query shape ── */
 
+// Master lists, ordered for the switcher.
+export function getDemoCollections() {
+  return [...COLLECTIONS].sort((a, b) => a.sort_order - b.sort_order)
+}
+
 // Wishlists list page: ordered by created_at descending.
 export function getDemoWishlists() {
   return [...WISHLISTS].sort((a, b) => b.created_at.localeCompare(a.created_at))
@@ -215,11 +241,28 @@ export function getDemoWishlist(id: string) {
   return w ? { id: w.id, name: w.name, description: w.description, budget: w.budget } : null
 }
 
-// Items for a list, newest first. (The detail page's Item type doesn't include
-// wishlist_id; leaving the extra field on the object is harmless.)
+// Items for a list, newest first, with priority/status/sort_order filled in
+// deterministically (stable per item) so the demo shows variety.
 export function getDemoItems(wishlistId: string) {
   return ITEMS.filter(i => i.wishlist_id === wishlistId)
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .map((i, idx) => {
+      const rnd = seeded(i.id + 'meta')
+      const priority = i.priority ?? (() => { const r = rnd(); return r < 0.22 ? 3 : r < 0.45 ? 2 : r < 0.7 ? 1 : 0 })()
+      const status = i.status ?? (i.purchased ? 'got' : (rnd() < 0.35 ? 'saved' : 'want'))
+      return { ...i, priority, status, sort_order: i.sort_order ?? idx }
+    })
+}
+
+// All items across every list, with their list context — for global search.
+export function getDemoSearchItems() {
+  const out: Array<DemoItem & { priority: number; status: string; list_name: string; list_emoji: string | null }> = []
+  for (const w of WISHLISTS) {
+    for (const it of getDemoItems(w.id)) {
+      out.push({ ...it, priority: it.priority ?? 0, status: it.status ?? 'want', list_name: w.name, list_emoji: w.emoji })
+    }
+  }
+  return out
 }
 
 // Used by the "move item to another list" dropdown.

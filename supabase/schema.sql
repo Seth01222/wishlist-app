@@ -28,8 +28,23 @@ create table if not exists public.wishlists (
   budget      numeric(12, 2),
   created_at  timestamptz not null default now()
 );
--- For databases created before `budget` existed:
-alter table public.wishlists add column if not exists budget numeric(12, 2);
+-- Master lists ("collections"): a top-level grouping above the per-category
+-- lists. A user can have several; each list (category) optionally belongs to one.
+create table if not exists public.collections (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references auth.users (id) on delete cascade,
+  name        text not null,
+  emoji       text,
+  description text,
+  color       text,            -- accent id (e.g. 'indigo', 'rose') for theming the master list
+  sort_order  integer not null default 0,
+  created_at  timestamptz not null default now()
+);
+
+-- For databases created before these columns existed:
+alter table public.wishlists add column if not exists budget        numeric(12, 2);
+alter table public.wishlists add column if not exists collection_id uuid references public.collections (id) on delete set null;
+alter table public.wishlists add column if not exists sort_order    integer not null default 0;
 
 create table if not exists public.wishlist_items (
   id            uuid primary key default gen_random_uuid(),
@@ -46,8 +61,16 @@ create table if not exists public.wishlist_items (
   purchased     boolean not null default false,
   purchased_at  timestamptz,
   tags          text[],
+  priority      smallint not null default 0,        -- 0 none · 1 low · 2 medium · 3 high
+  status        text not null default 'want',       -- 'want' | 'saved' | 'got'
+  sort_order    integer not null default 0,
   created_at    timestamptz not null default now()
 );
+
+-- For databases created before these columns existed:
+alter table public.wishlist_items add column if not exists priority   smallint not null default 0;
+alter table public.wishlist_items add column if not exists status     text not null default 'want';
+alter table public.wishlist_items add column if not exists sort_order integer not null default 0;
 
 -- Price history: one row per observed price for an item, used for the
 -- sparkline, "lowest ever" and price-drop insights. Rows are appended whenever
@@ -73,16 +96,24 @@ create table if not exists public.profiles (
 -- ─── Indexes ───────────────────────────────────────────────────────────────
 -- Speeds up the per-user list query and the per-list items query.
 
+create index if not exists collections_user_id_idx        on public.collections (user_id);
 create index if not exists wishlists_user_id_idx          on public.wishlists (user_id);
+create index if not exists wishlists_collection_id_idx    on public.wishlists (collection_id);
 create index if not exists wishlist_items_wishlist_id_idx  on public.wishlist_items (wishlist_id);
 create index if not exists price_records_item_id_idx       on public.price_records (item_id, recorded_at);
 
 -- ─── Row Level Security ──────────────────────────────────────────────────────
 
+alter table public.collections    enable row level security;
 alter table public.wishlists      enable row level security;
 alter table public.wishlist_items enable row level security;
 alter table public.price_records  enable row level security;
 alter table public.profiles       enable row level security;
+
+-- Collections: a user may only touch their own.
+drop policy if exists "collections_all_own" on public.collections;
+create policy "collections_all_own" on public.collections
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- Price records: ownership inherited through the item's parent wishlist.
 drop policy if exists "price_records_select_own" on public.price_records;

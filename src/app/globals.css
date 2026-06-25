@@ -6,6 +6,8 @@
    hover (edit/delete buttons, etc.) can be shown permanently on mobile. */
 @variant touch (@media (hover: none));
 
+@keyframes slideUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+
 /* ─── Semantic tokens: Light ─────────────────────────────────── */
 :root {
   --canvas:  #f4f4f8;
