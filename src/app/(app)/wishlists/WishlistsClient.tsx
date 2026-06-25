@@ -450,8 +450,8 @@ function ShareModal({ sharedUrl, sharedTitle, sharedPrice, sharedImage, sharedCu
     }
   }
 
-  // Only show master lists that actually contain a category.
-  const usedCollections = collections.filter(c => lists.some(l => l.collection_id === c.id))
+  // Show all collections so the user can filter and create categories under any master list.
+  const usedCollections = collections
   const hasUnsorted = lists.some(l => !l.collection_id)
   const shownLists = lists.filter(l => colFilter === 'all' || (l.collection_id ?? 'none') === colFilter)
   const colName = (id: string | null | undefined) => collections.find(c => c.id === id)?.name ?? null
