@@ -84,6 +84,7 @@ export default function WishlistDetailClient({
   const [refreshingImages, setRefreshingImages] = useState(false)
   const [refreshProgress, setRefreshProgress] = useState(0)
   const [refreshResult, setRefreshResult] = useState<{ found: number; total: number } | null>(null)
+  const [copied, setCopied] = useState(false)
   const { taxEnabled, taxRate } = useTheme()
 
   // Load saved view from localStorage
@@ -260,8 +261,8 @@ export default function WishlistDetailClient({
       }),
     ].filter(Boolean).join('\n')
     navigator.clipboard.writeText(lines)
-      .then(() => alert('Copied to clipboard!'))
-      .catch(() => alert('Could not copy. Try selecting text manually.'))
+      .then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) })
+      .catch(() => { setCopied(false) })
   }
 
   async function refreshAllImages() {
@@ -397,8 +398,11 @@ export default function WishlistDetailClient({
           </button>
 
           {/* Copy */}
-          <button onClick={copyToClipboard} title="Copy list to clipboard" className="p-2 rounded-lg bg-raised text-dim hover:text-ink spring">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+          <button onClick={copyToClipboard} title="Copy list to clipboard" className={`p-2 rounded-lg spring text-sm ${copied ? 'text-emerald-400 bg-emerald-500/10' : 'bg-raised text-dim hover:text-ink'}`}>
+            {copied
+              ? <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>
+              : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+            }
           </button>
 
           {/* Select (bulk) */}
@@ -557,6 +561,7 @@ function CardItem({ item, history, onRecheck, onEdit, onDelete, onStatus, onPatc
 }) {
   const [imgErr, setImgErr] = useState(false)
   const [fetchingImg, setFetchingImg] = useState(false)
+  const retailer = retailerName(item.url)
 
   async function refreshImage() {
     if (!item.url || fetchingImg) return
@@ -617,9 +622,9 @@ function CardItem({ item, history, onRecheck, onEdit, onDelete, onStatus, onPatc
 
           <StarRating value={item.star_rating} onChange={v => onPatch(item.id, { star_rating: v })} />
 
-          {retailerName(item.url) && (
+          {retailer && (
             <span className="inline-block mt-1 text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded bg-raised text-ghost">
-              {retailerName(item.url)}
+              {retailer}
             </span>
           )}
 

@@ -582,7 +582,7 @@ export default function ImportModal({
 
             {step === 1 && (
               <button onClick={() => setStep(2)} disabled={!rawList.trim()} className="px-5 py-2 text-sm rounded-xl spring disabled:opacity-40" style={{ background: 'var(--a600)', color: 'var(--a-on)' }}>
-                I've got the JSON →
+                Next: paste response →
               </button>
             )}
             {step === 2 && (
