@@ -2,6 +2,7 @@ import { cookies } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
 import { DEMO_COOKIE } from '@/lib/demo/config'
 import { getDemoSearchItems } from '@/lib/demo/data'
+import SchemaNotice from '@/components/SchemaNotice'
 import SearchClient, { type SearchRow } from './SearchClient'
 
 export default async function SearchPage() {
@@ -17,10 +18,17 @@ export default async function SearchPage() {
   }
 
   const supabase = await createClient()
-  const { data } = await supabase
+  // Try with priority/status; fall back if the DB hasn't been migrated yet.
+  let { data, error } = await supabase
     .from('wishlist_items')
     .select('id, name, image_url, auto_price, target_price, priority, status, purchased, tags, wishlist_id, wishlists(name, emoji)')
     .order('priority', { ascending: false })
+  if (error) {
+    const fb = await supabase
+      .from('wishlist_items')
+      .select('id, name, image_url, auto_price, target_price, purchased, tags, wishlist_id, wishlists(name, emoji)')
+    data = fb.data as typeof data
+  }
 
   type Row = {
     id: string; name: string; image_url: string | null
@@ -41,5 +49,10 @@ export default async function SearchPage() {
     }
   })
 
-  return <SearchClient items={items} />
+  return (
+    <>
+      {error && <SchemaNotice />}
+      <SearchClient items={items} />
+    </>
+  )
 }
