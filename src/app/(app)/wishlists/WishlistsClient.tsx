@@ -35,6 +35,7 @@ export default function WishlistsClient({ initialWishlists, itemSummary, initial
   const [showArchived, setShowArchived] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [editingList, setEditingList] = useState<Wishlist | null>(null)
+  const [deletingCollection, setDeletingCollection] = useState<Collection | null>(null)
 
   // Remember the last selected master list across visits.
   useEffect(() => {
@@ -130,13 +131,13 @@ export default function WishlistsClient({ initialWishlists, itemSummary, initial
     setEditingCollection(null)
   }
   async function deleteCollection(id: string) {
-    if (!confirm('Delete this master list? Its categories will move to “Unsorted”, not be deleted.')) return
     const supabase = createClient()
     await supabase.from('collections').delete().eq('id', id)
     setCollections(collections.filter(c => c.id !== id))
     setWishlists(wishlists.map(w => w.collection_id === id ? { ...w, collection_id: null } : w))
     if (selectedCol === id) selectCollection('all')
     setEditingCollection(null)
+    setDeletingCollection(null)
   }
 
   // Create a category on the fly (used by the quick-add modal). Returns the new
@@ -315,7 +316,7 @@ export default function WishlistsClient({ initialWishlists, itemSummary, initial
         <CollectionModal
           collection={editingCollection}
           onSave={patch => editingCollection ? updateCollection(editingCollection.id, patch) : createCollection(patch)}
-          onDelete={deleteCollection}
+          onDelete={() => setDeletingCollection(editingCollection)}
           onClose={() => { setShowCollectionForm(false); setEditingCollection(null) }}
         />
       )}
@@ -333,6 +334,20 @@ export default function WishlistsClient({ initialWishlists, itemSummary, initial
           onCreateCategory={createCategory}
           onClose={() => setShareModal(null)}
         />
+      )}
+
+      {/* ── Delete master list confirm ── */}
+      {deletingCollection && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-card border border-line rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <h2 className="font-semibold text-ink mb-2">Delete "{deletingCollection.name}"?</h2>
+            <p className="text-dim text-sm mb-5">Its categories will move to Unsorted — nothing will be deleted from them.</p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setDeletingCollection(null)} className="px-4 py-2 text-sm text-dim hover:text-ink rounded-lg hover:bg-raised spring">Cancel</button>
+              <button onClick={() => deleteCollection(deletingCollection.id)} className="px-4 py-2 text-sm rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 spring">Delete</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Import modal ── */}

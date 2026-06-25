@@ -159,7 +159,7 @@ export default function ImportModal({
   function copyPrompt() {
     navigator.clipboard.writeText(buildPrompt(rawList))
       .then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) })
-      .catch(() => alert('Could not copy — select all and copy manually.'))
+      .catch(() => { /* clipboard unavailable — user can select + copy manually */ })
   }
 
   async function handleParse() {
@@ -233,7 +233,7 @@ export default function ImportModal({
 
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { alert('Not logged in.'); setImporting(false); return }
+    if (!user) { setImporting(false); onClose(); return }
 
     // Build a name→id map from existing lists (case-insensitive)
     const listMap = new Map<string, string>()

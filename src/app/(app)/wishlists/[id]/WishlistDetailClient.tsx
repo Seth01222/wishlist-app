@@ -85,6 +85,7 @@ export default function WishlistDetailClient({
   const [refreshProgress, setRefreshProgress] = useState(0)
   const [refreshResult, setRefreshResult] = useState<{ found: number; total: number } | null>(null)
   const [copied, setCopied] = useState(false)
+  const [confirmingBulkDelete, setConfirmingBulkDelete] = useState(false)
   const { taxEnabled, taxRate } = useTheme()
 
   // Load saved view from localStorage
@@ -182,7 +183,7 @@ export default function WishlistDetailClient({
   const bulkStatus   = (s: ItemStatus) => bulkApply(i => statusPatch(i, s))
   const bulkPriority = (p: number) => bulkApply(() => ({ priority: p }))
   const bulkMove     = (listId: string) => bulkApply(() => ({ wishlist_id: listId } as Partial<Item>), true)
-  const bulkDelete   = () => { if (confirm(`Delete ${selected.size} item(s)?`)) bulkApply(() => ({}), true) }
+  const bulkDelete   = () => setConfirmingBulkDelete(true)
 
   /* ── Drag-to-reorder (manual sort) ── */
   async function handleDrop(targetId: string) {
@@ -533,6 +534,20 @@ export default function WishlistDetailClient({
       {/* ── Move modal ── */}
       {movingItem && (
         <MoveModal item={movingItem} lists={otherLists.filter(l => l.id !== wishlist.id)} onMove={moveItem} onClose={() => setMovingItem(null)} />
+      )}
+
+      {/* ── Bulk delete confirm ── */}
+      {confirmingBulkDelete && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-card border border-line rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <h2 className="font-semibold text-ink mb-2">Delete {selected.size} item{selected.size !== 1 ? 's' : ''}?</h2>
+            <p className="text-dim text-sm mb-5">This can't be undone.</p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setConfirmingBulkDelete(false)} className="px-4 py-2 text-sm text-dim hover:text-ink rounded-lg hover:bg-raised spring">Cancel</button>
+              <button onClick={() => { setConfirmingBulkDelete(false); bulkApply(() => ({}), true) }} className="px-4 py-2 text-sm rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 spring">Delete</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Bulk action bar ── */}
