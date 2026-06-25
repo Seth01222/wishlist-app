@@ -139,6 +139,20 @@ export default function WishlistsClient({ initialWishlists, itemSummary, initial
     setEditingCollection(null)
   }
 
+  // Create a category on the fly (used by the quick-add modal). Returns the new
+  // list so the caller can immediately select it.
+  async function createCategory(name: string, collectionId: string | null): Promise<Wishlist | null> {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return null
+    const { data } = await supabase.from('wishlists')
+      .insert({ name: name.trim(), user_id: user.id, emoji: '🛍️', collection_id: collectionId })
+      .select().single()
+    if (!data) return null
+    setWishlists(prev => [data as Wishlist, ...prev])
+    return data as Wishlist
+  }
+
   async function updateWishlist(id: string, patch: Partial<Wishlist>) {
     const supabase = createClient()
     await supabase.from('wishlists').update(patch).eq('id', id)
@@ -315,6 +329,8 @@ export default function WishlistsClient({ initialWishlists, itemSummary, initial
           sharedImage={shareModal.image}
           sharedCurrency={shareModal.currency}
           lists={wishlists.filter(w => !w.archived)}
+          collections={collections}
+          onCreateCategory={createCategory}
           onClose={() => setShareModal(null)}
         />
       )}
@@ -389,13 +405,47 @@ function ListCard({ list, stats, onEdit, onDelete, onArchive }: {
 }
 
 /* ─── Share target modal ────────────────────────────────────── */
-function ShareModal({ sharedUrl, sharedTitle, sharedPrice, sharedImage, sharedCurrency, lists, onClose }: {
+function ShareModal({ sharedUrl, sharedTitle, sharedPrice, sharedImage, sharedCurrency, lists, collections, onCreateCategory, onClose }: {
   sharedUrl: string; sharedTitle: string; sharedPrice?: string; sharedImage?: string; sharedCurrency?: string
-  lists: Wishlist[]; onClose: () => void
+  lists: Wishlist[]; collections: Collection[]
+  onCreateCategory: (name: string, collectionId: string | null) => Promise<Wishlist | null>
+  onClose: () => void
 }) {
   const router = useRouter()
+  const [colFilter, setColFilter] = useState<string | 'all'>('all')
   const [selected, setSelected] = useState<string | null>(lists[0]?.id ?? null)
   const [loading, setLoading] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [creatingLoad, setCreatingLoad] = useState(false)
+
+  // Which master list a newly-created category lands in (null = Unsorted).
+  const targetCol = colFilter !== 'all' && colFilter !== 'none' ? colFilter : null
+
+  async function createCategory() {
+    if (!newName.trim()) return
+    setCreatingLoad(true)
+    const created = await onCreateCategory(newName.trim(), targetCol)
+    setCreatingLoad(false)
+    if (created) {
+      setColFilter(created.collection_id ?? 'none')
+      setSelected(created.id)
+      setCreating(false)
+      setNewName('')
+    }
+  }
+
+  // Only show master lists that actually contain a category.
+  const usedCollections = collections.filter(c => lists.some(l => l.collection_id === c.id))
+  const hasUnsorted = lists.some(l => !l.collection_id)
+  const shownLists = lists.filter(l => colFilter === 'all' || (l.collection_id ?? 'none') === colFilter)
+  const colName = (id: string | null | undefined) => collections.find(c => c.id === id)?.name ?? null
+
+  function pickCol(id: string | 'all') {
+    setColFilter(id)
+    const first = lists.find(l => id === 'all' || (l.collection_id ?? 'none') === id)
+    setSelected(first?.id ?? null)
+  }
 
   const priceNum = sharedPrice ? parseFloat(sharedPrice) : null
 
@@ -433,19 +483,61 @@ function ShareModal({ sharedUrl, sharedTitle, sharedPrice, sharedImage, sharedCu
             )}
           </div>
         </div>
-        <p className="text-sm font-medium text-ink mb-2">Choose a list:</p>
-        {lists.length === 0
-          ? <p className="text-ghost text-sm mb-4">Create a list first.</p>
+        {/* Master-list filter */}
+        {usedCollections.length > 0 && (
+          <>
+            <p className="text-sm font-medium text-ink mb-1.5">Master list:</p>
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              <button onClick={() => pickCol('all')} className={`px-2.5 py-1 text-xs rounded-full border spring ${colFilter==='all' ? 'text-[var(--a-on)] border-transparent' : 'border-line bg-raised text-dim hover:text-ink'}`} style={colFilter==='all' ? { background:'var(--a600)' } : {}}>✨ All</button>
+              {usedCollections.map(c => (
+                <button key={c.id} onClick={() => pickCol(c.id)} className={`px-2.5 py-1 text-xs rounded-full border spring ${colFilter===c.id ? 'text-white border-transparent' : 'border-line bg-raised text-dim hover:text-ink'}`} style={colFilter===c.id ? { background: accentHex(c.color) } : {}}>{c.emoji ?? '📂'} {c.name}</button>
+              ))}
+              {hasUnsorted && (
+                <button onClick={() => pickCol('none')} className={`px-2.5 py-1 text-xs rounded-full border spring ${colFilter==='none' ? 'text-[var(--a-on)] border-transparent' : 'border-line bg-raised text-dim hover:text-ink'}`} style={colFilter==='none' ? { background:'var(--a600)' } : {}}>📥 Unsorted</button>
+              )}
+            </div>
+          </>
+        )}
+
+        <p className="text-sm font-medium text-ink mb-2">Choose a category:</p>
+        {shownLists.length === 0
+          ? <p className="text-ghost text-sm mb-4">No categories here yet.</p>
           : <div className="space-y-1.5 mb-4 max-h-52 overflow-y-auto">
-              {lists.map(l => (
+              {shownLists.map(l => (
                 <button key={l.id} onClick={() => setSelected(l.id)}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium spring text-left ${selected===l.id ? 'text-[var(--a-on)]' : 'bg-raised text-ink hover:bg-line'}`}
                   style={selected===l.id ? { background:'var(--a600)' } : {}}>
-                  <span>{l.emoji ?? '🛍️'}</span>{l.name}
+                  <span>{l.emoji ?? '🛍️'}</span>
+                  <span className="flex-1 min-w-0 truncate">{l.name}</span>
+                  {colFilter === 'all' && colName(l.collection_id) && (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${selected===l.id ? 'bg-white/25' : 'bg-card text-ghost'}`}>{colName(l.collection_id)}</span>
+                  )}
                 </button>
               ))}
             </div>
         }
+        {/* New category */}
+        {creating ? (
+          <div className="mb-4 p-3 rounded-xl border border-line bg-raised">
+            <p className="text-xs text-dim mb-1.5">
+              New category{targetCol ? <> in <span className="font-medium text-ink">{collections.find(c => c.id === targetCol)?.name}</span></> : ' (Unsorted)'}
+            </p>
+            <div className="flex gap-2">
+              <input autoFocus value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && createCategory()}
+                placeholder="Category name…" className={INPUT} style={RING} />
+              <button onClick={createCategory} disabled={!newName.trim() || creatingLoad} className="px-3 rounded-lg text-sm font-medium spring disabled:opacity-40 shrink-0" style={{ background:'var(--a600)', color:'var(--a-on)' }}>
+                {creatingLoad ? '…' : 'Create'}
+              </button>
+            </div>
+            <button onClick={() => { setCreating(false); setNewName('') }} className="text-xs text-ghost hover:text-dim mt-1.5 spring">Cancel</button>
+          </div>
+        ) : (
+          <button onClick={() => setCreating(true)} className="w-full mb-4 flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium border border-dashed border-line text-dim hover:text-ink spring">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/></svg>
+            New category{targetCol ? ` in ${collections.find(c => c.id === targetCol)?.name}` : ''}
+          </button>
+        )}
+
         <div className="flex gap-2">
           <button onClick={onClose} className="flex-1 py-2.5 text-sm text-dim hover:text-ink rounded-xl hover:bg-raised spring">Cancel</button>
           <button onClick={addToList} disabled={!selected || loading} className="flex-1 py-2.5 text-sm rounded-xl spring disabled:opacity-40" style={{ background:'var(--a600)', color:'var(--a-on)' }}>
