@@ -10,21 +10,42 @@ import { useTheme } from '@/components/ThemeProvider'
 import ImportModal from '@/components/ImportModal'
 import EmojiPicker from '@/components/EmojiPicker'
 import { INPUT_CLASS as INPUT, RING_STYLE as RING } from '@/lib/ui'
+import { ACCENTS } from '@/lib/theme'
+import CollectionModal from '@/components/collections/CollectionModal'
+import CollectionSwitcher from '@/components/collections/CollectionSwitcher'
 
-type Wishlist = { id: string; name: string; description: string | null; created_at: string; emoji: string | null; archived: boolean | null }
+type Wishlist = { id: string; name: string; description: string | null; created_at: string; emoji: string | null; archived: boolean | null; collection_id?: string | null; sort_order?: number }
+type Collection = { id: string; name: string; emoji: string | null; description: string | null; color: string | null; sort_order: number }
 type ItemSummaryRow = { wishlist_id: string; purchased: boolean | null; auto_price: number | null; target_price: number | null; quantity: number | null }
+
+const accentHex = (id: string | null | undefined) => ACCENTS.find(a => a.id === id)?.hex ?? 'var(--a600)'
+const SELECTED_KEY = 'wl-collection'
 
 const fmt = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 })
 
 function itemPrice(r: ItemSummaryRow) { return Number(r.auto_price ?? r.target_price ?? 0) * (r.quantity ?? 1) }
 
-export default function WishlistsClient({ initialWishlists, itemSummary, shareUrl, shareTitle, sharePrice, shareImage, shareCurrency }: { initialWishlists: Wishlist[]; itemSummary: ItemSummaryRow[]; shareUrl?: string; shareTitle?: string; sharePrice?: string; shareImage?: string; shareCurrency?: string }) {
+export default function WishlistsClient({ initialWishlists, itemSummary, initialCollections = [], shareUrl, shareTitle, sharePrice, shareImage, shareCurrency }: { initialWishlists: Wishlist[]; itemSummary: ItemSummaryRow[]; initialCollections?: Collection[]; shareUrl?: string; shareTitle?: string; sharePrice?: string; shareImage?: string; shareCurrency?: string }) {
   const router = useRouter()
   const [wishlists, setWishlists] = useState(initialWishlists)
+  const [collections, setCollections] = useState(initialCollections)
+  const [selectedCol, setSelectedCol] = useState<string | 'all'>('all')
+  const [showCollectionForm, setShowCollectionForm] = useState(false)
+  const [editingCollection, setEditingCollection] = useState<Collection | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [showArchived, setShowArchived] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [editingList, setEditingList] = useState<Wishlist | null>(null)
+
+  // Remember the last selected master list across visits.
+  useEffect(() => {
+    const saved = localStorage.getItem(SELECTED_KEY)
+    if (saved && (saved === 'all' || initialCollections.some(c => c.id === saved))) setSelectedCol(saved)
+  }, [initialCollections])
+  function selectCollection(id: string | 'all') {
+    setSelectedCol(id)
+    try { localStorage.setItem(SELECTED_KEY, id) } catch { /* ignore */ }
+  }
   const [shareModal, setShareModal] = useState<{ url: string; title: string; price?: string; image?: string; currency?: string } | null>(
     shareUrl ? { url: shareUrl, title: shareTitle ?? '', price: sharePrice, image: shareImage, currency: shareCurrency } : null
   )
@@ -59,8 +80,16 @@ export default function WishlistsClient({ initialWishlists, itemSummary, shareUr
   const totalValue   = useMemo(() => [...statsByList.values()].reduce((s, v) => s + v.total, 0), [statsByList])
   const totalSavings = useMemo(() => [...statsByList.values()].reduce((s, v) => s + v.savings, 0), [statsByList])
 
-  const active   = wishlists.filter(w => !w.archived)
-  const archived = wishlists.filter(w => w.archived)
+  const inCollection = (w: Wishlist) => selectedCol === 'all' || (w.collection_id ?? null) === selectedCol
+  const scoped   = wishlists.filter(inCollection)
+  const active   = scoped.filter(w => !w.archived)
+  const archived = scoped.filter(w => w.archived)
+  // Count lists per collection for the switcher badges.
+  const countByCol = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const w of wishlists) if (!w.archived) m.set(w.collection_id ?? '', (m.get(w.collection_id ?? '') ?? 0) + 1)
+    return m
+  }, [wishlists])
 
   const displayActive = active.filter(w =>
     !search || w.name.toLowerCase().includes(search.toLowerCase()) || w.description?.toLowerCase().includes(search.toLowerCase())
@@ -77,10 +106,37 @@ export default function WishlistsClient({ initialWishlists, itemSummary, shareUr
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { setError('Not logged in.'); setLoading(false); return }
     const { data, error } = await supabase.from('wishlists')
-      .insert({ name: name.trim(), description: description.trim() || null, user_id: user.id, emoji })
+      .insert({ name: name.trim(), description: description.trim() || null, user_id: user.id, emoji, collection_id: selectedCol === 'all' ? null : selectedCol })
       .select().single()
     if (error) { setError(error.message); setLoading(false) }
     else { setWishlists([data as Wishlist, ...wishlists]); setName(''); setDescription(''); setEmoji('🛍️'); setShowForm(false); setLoading(false) }
+  }
+
+  /* ── Collection (master list) mutations ── */
+  async function createCollection(patch: { name: string; emoji: string; description: string | null; color: string }) {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { data } = await supabase.from('collections')
+      .insert({ ...patch, user_id: user.id, sort_order: collections.length })
+      .select().single()
+    if (data) { setCollections([...collections, data as Collection]); selectCollection((data as Collection).id) }
+    setShowCollectionForm(false)
+  }
+  async function updateCollection(id: string, patch: Partial<Collection>) {
+    const supabase = createClient()
+    await supabase.from('collections').update(patch).eq('id', id)
+    setCollections(collections.map(c => c.id === id ? { ...c, ...patch } : c))
+    setEditingCollection(null)
+  }
+  async function deleteCollection(id: string) {
+    if (!confirm('Delete this master list? Its categories will move to “Unsorted”, not be deleted.')) return
+    const supabase = createClient()
+    await supabase.from('collections').delete().eq('id', id)
+    setCollections(collections.filter(c => c.id !== id))
+    setWishlists(wishlists.map(w => w.collection_id === id ? { ...w, collection_id: null } : w))
+    if (selectedCol === id) selectCollection('all')
+    setEditingCollection(null)
   }
 
   async function updateWishlist(id: string, patch: Partial<Wishlist>) {
@@ -102,14 +158,29 @@ export default function WishlistsClient({ initialWishlists, itemSummary, shareUr
     setWishlists(wishlists.map(w => w.id === id ? { ...w, archived } : w))
   }
 
+  const activeCollection = collections.find(c => c.id === selectedCol) ?? null
+
   return (
     <div>
+      {/* ── Master-list switcher ── */}
+      <CollectionSwitcher
+        collections={collections}
+        selected={selectedCol}
+        counts={countByCol}
+        onSelect={selectCollection}
+        onAdd={() => setShowCollectionForm(true)}
+        onEdit={c => setEditingCollection(c)}
+      />
+
       {/* ── Header ── */}
       <div className="flex items-start justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-ink">My Wishlists</h1>
+          <h1 className="text-2xl font-bold text-ink flex items-center gap-2">
+            {activeCollection ? <>{activeCollection.emoji} {activeCollection.name}</> : 'All wishlists'}
+          </h1>
           <p className="text-dim text-sm mt-1">
-            {active.length === 0 ? 'Start by creating a list' : `${active.length} list${active.length !== 1 ? 's' : ''}`}
+            {activeCollection?.description ? `${activeCollection.description} · ` : ''}
+            {active.length === 0 ? 'Start by creating a category' : `${active.length} categor${active.length !== 1 ? 'ies' : 'y'}`}
             {archived.length > 0 && ` · ${archived.length} archived`}
           </p>
         </div>
@@ -219,8 +290,19 @@ export default function WishlistsClient({ initialWishlists, itemSummary, shareUr
       {editingList && (
         <EditListModal
           list={editingList}
+          collections={collections}
           onSave={async patch => { await updateWishlist(editingList.id, patch); setEditingList(null) }}
           onClose={() => setEditingList(null)}
+        />
+      )}
+
+      {/* ── Master-list (collection) modal ── */}
+      {(showCollectionForm || editingCollection) && (
+        <CollectionModal
+          collection={editingCollection}
+          onSave={patch => editingCollection ? updateCollection(editingCollection.id, patch) : createCollection(patch)}
+          onDelete={deleteCollection}
+          onClose={() => { setShowCollectionForm(false); setEditingCollection(null) }}
         />
       )}
 
@@ -376,21 +458,23 @@ function ShareModal({ sharedUrl, sharedTitle, sharedPrice, sharedImage, sharedCu
 }
 
 /* ─── Edit list modal ───────────────────────────────────────── */
-function EditListModal({ list, onSave, onClose }: {
+function EditListModal({ list, collections, onSave, onClose }: {
   list: Wishlist
+  collections: Collection[]
   onSave: (patch: Partial<Wishlist>) => Promise<void>
   onClose: () => void
 }) {
   const [name, setName] = useState(list.name)
   const [description, setDescription] = useState(list.description ?? '')
   const [emoji, setEmoji] = useState(list.emoji ?? '🛍️')
+  const [collectionId, setCollectionId] = useState<string>(list.collection_id ?? '')
   const [loading, setLoading] = useState(false)
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
     if (!name.trim()) return
     setLoading(true)
-    await onSave({ name: name.trim(), description: description.trim() || null, emoji })
+    await onSave({ name: name.trim(), description: description.trim() || null, emoji, collection_id: collectionId || null })
     setLoading(false)
   }
 
@@ -422,6 +506,16 @@ function EditListModal({ list, onSave, onClose }: {
             <input type="text" value={description} onChange={e => setDescription(e.target.value)}
               placeholder="What is this list for?" className={INPUT} style={RING} />
           </div>
+
+          {collections.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-ink mb-1.5">Master list</label>
+              <select value={collectionId} onChange={e => setCollectionId(e.target.value)} className={INPUT} style={RING}>
+                <option value="">Unsorted</option>
+                {collections.map(c => <option key={c.id} value={c.id}>{c.emoji ?? '📂'} {c.name}</option>)}
+              </select>
+            </div>
+          )}
 
           <div className="flex gap-3 justify-end pt-1">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-dim hover:text-ink rounded-lg hover:bg-raised spring">Cancel</button>

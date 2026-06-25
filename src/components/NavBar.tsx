@@ -52,6 +52,11 @@ export default function NavBar({ userEmail }: { userEmail: string }) {
 
         {/* Right side */}
         <div className="flex items-center gap-2">
+          {/* Global search */}
+          <Link href="/search" title="Search everything" className="p-2 rounded-lg text-dim hover:text-ink hover:bg-raised transition-colors">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0"/></svg>
+          </Link>
+
           {/* Quick Add tools (bookmarklet / extension) */}
           <Link
             href="/tools"

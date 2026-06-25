@@ -33,10 +33,14 @@ Users can choose any mode per lookup:
 ## Database Schema
 The source of truth is [`supabase/schema.sql`](supabase/schema.sql) (run it in the
 Supabase SQL editor to recreate the DB). Current tables:
-- `wishlists` — user's lists: `user_id`, `name`, `description`, `emoji`, `archived`, `budget`, `created_at`
+- `collections` — master lists (a level above categories): `user_id`, `name`, `emoji`,
+  `description`, `color` (accent id), `sort_order`, `created_at`
+- `wishlists` — categories within a master list: `user_id`, `name`, `description`, `emoji`,
+  `archived`, `budget`, `collection_id`, `sort_order`, `created_at`
 - `wishlist_items` — items in a list: `wishlist_id`, `name`, `url`, `image_url`, `notes`,
   `target_price`, `auto_price`, `auto_currency`, `star_rating`, `quantity`, `purchased`,
-  `purchased_at`, `tags`, `created_at`
+  `purchased_at`, `tags`, `priority` (0–3), `status` ('want'|'saved'|'got'; 'got' ⟺
+  `purchased`), `sort_order`, `created_at`
 - `price_records` — price history per item: `item_id`, `price`, `currency`, `source`,
   `recorded_at` (powers sparkline / lowest-ever / drop badges)
 - `profiles` — per-user settings: `id` (= auth user id), `serpapi_key`, `created_at`
@@ -66,8 +70,19 @@ Planned tables (not built yet):
     lowest-ever / drop badges, per-item re-check, per-list budget meter. Customizable via
     the "Price insights" settings (localStorage; `src/lib/usePriceInsights.tsx`).
     Components in `src/components/price/`; pure helpers in `src/lib/price.ts`.
-11. 🟡 Tags + priority ranking (tags + star rating + "smart" sort done; no priority field)
+11. ✅ Tags + priority ranking (tags, star rating, real `priority` field with badges/sort/filter)
 12. ⬜ Shareable lists (public link) — note: `/share-target` only *receives* iOS shares
+
+## Organization (master lists, statuses, bulk, search)
+- **Master lists** (`collections`): a top-level grouping above categories, switched via the
+  pill switcher on `/wishlists` (`CollectionSwitcher`/`CollectionModal`). Customizable emoji,
+  color, name, description. Categories carry `collection_id`.
+- **Statuses**: items are `want` → `saved` (set aside) → `got`. `got` stays in sync with
+  `purchased`. The list budget meter intertwines: got/saved/want segments vs. budget.
+- **Priority**: 0–3 (`PRIORITY_META` in `src/lib/itemMeta.ts`), with badges, sort, filter, bulk.
+- **Bulk actions** (`BulkBar`): select items → set status/priority, move, delete.
+- **Drag-to-reorder**: "Manual order" sort persists `sort_order`.
+- **Global search**: `/search` searches all items with status/priority/tag/price filters.
 
 ## Demo Mode
 A no-account demo is gated by the `wl-demo` cookie (`src/lib/demo/`). It serves
