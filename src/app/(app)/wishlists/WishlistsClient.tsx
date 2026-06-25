@@ -26,7 +26,6 @@ const fmt = (n: number) => n.toLocaleString('en-US', { style: 'currency', curren
 function itemPrice(r: ItemSummaryRow) { return Number(r.auto_price ?? r.target_price ?? 0) * (r.quantity ?? 1) }
 
 export default function WishlistsClient({ initialWishlists, itemSummary, initialCollections = [], shareUrl, shareTitle, sharePrice, shareImage, shareCurrency }: { initialWishlists: Wishlist[]; itemSummary: ItemSummaryRow[]; initialCollections?: Collection[]; shareUrl?: string; shareTitle?: string; sharePrice?: string; shareImage?: string; shareCurrency?: string }) {
-  const router = useRouter()
   const [wishlists, setWishlists] = useState(initialWishlists)
   const [collections, setCollections] = useState(initialCollections)
   const [selectedCol, setSelectedCol] = useState<string | 'all'>('all')
@@ -50,10 +49,11 @@ export default function WishlistsClient({ initialWishlists, itemSummary, initial
     shareUrl ? { url: shareUrl, title: shareTitle ?? '', price: sharePrice, image: shareImage, currency: shareCurrency } : null
   )
 
-  // Clear the ?share= query params from the URL once modal is shown
+  // Clean up the ?share= params from the address bar without triggering a Next.js
+  // navigation (router.replace would re-render the server component and wipe shareModal state)
   useEffect(() => {
-    if (shareUrl) router.replace('/wishlists')
-  }, [shareUrl, router])
+    if (shareUrl) window.history.replaceState(null, '', '/wishlists')
+  }, [shareUrl])
   const [search, setSearch] = useState('')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
