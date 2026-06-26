@@ -21,7 +21,8 @@ type ItemSummaryRow = { wishlist_id: string; purchased: boolean | null; auto_pri
 const accentHex = (id: string | null | undefined) => ACCENTS.find(a => a.id === id)?.hex ?? 'var(--a600)'
 const SELECTED_KEY = 'wl-collection'
 
-const fmt = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 })
+const fmt     = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 })
+const fmtFull = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
 
 function itemPrice(r: ItemSummaryRow) { return Number(r.auto_price ?? r.target_price ?? 0) * (r.quantity ?? 1) }
 
@@ -77,14 +78,16 @@ export default function WishlistsClient({ initialWishlists, itemSummary, initial
 
   const { taxEnabled, taxRate } = useTheme()
 
-  /* ── Global totals (raw, pre-tax) ── */
-  const totalValue   = useMemo(() => [...statsByList.values()].reduce((s, v) => s + v.total, 0), [statsByList])
-  const totalSavings = useMemo(() => [...statsByList.values()].reduce((s, v) => s + v.savings, 0), [statsByList])
-
   const inCollection = (w: Wishlist) => selectedCol === 'all' || (w.collection_id ?? null) === selectedCol
   const scoped   = wishlists.filter(inCollection)
   const active   = scoped.filter(w => !w.archived)
   const archived = scoped.filter(w => w.archived)
+
+  /* ── Scoped totals (filtered to the active collection) ── */
+  const scopedIds = new Set(scoped.map(w => w.id))
+  const scopedValue   = [...statsByList.entries()].reduce((s, [id, v]) => scopedIds.has(id) ? s + v.total   : s, 0)
+  const scopedSavings = [...statsByList.entries()].reduce((s, [id, v]) => scopedIds.has(id) ? s + v.savings : s, 0)
+  const taxMult = taxEnabled && taxRate > 0 ? 1 + taxRate / 100 : 1
   // Count lists per collection for the switcher badges.
   const countByCol = useMemo(() => {
     const m = new Map<string, number>()
@@ -212,18 +215,30 @@ export default function WishlistsClient({ initialWishlists, itemSummary, initial
       </div>
 
       {/* ── Stats banner ── */}
-      {(totalValue > 0 || totalSavings > 0) && (
+      {(scopedValue > 0 || scopedSavings > 0) && (
         <div className="flex gap-3 mb-6">
-          {totalValue > 0 && (
+          {scopedValue > 0 && (
             <div className="flex-1 bg-card border border-line rounded-2xl px-4 py-3">
-              <p className="text-xs text-ghost uppercase tracking-wide mb-0.5">Wish total</p>
-              <p className="text-lg font-bold text-ink"><TaxPrice price={totalValue} variant="total" /></p>
+              <p className="text-xs text-ghost uppercase tracking-wide mb-0.5">
+                {selectedCol === 'all' ? 'Wish total' : `${activeCollection?.name ?? 'List'} total`}
+              </p>
+              <p className="text-lg font-bold text-ink">
+                {taxEnabled && taxRate > 0 ? fmtFull(scopedValue * taxMult) : fmt(scopedValue)}
+              </p>
+              {taxEnabled && taxRate > 0 && (
+                <p className="text-xs text-ghost mt-0.5">{fmt(scopedValue)} before tax</p>
+              )}
             </div>
           )}
-          {totalSavings > 0 && (
+          {scopedSavings > 0 && (
             <div className="flex-1 rounded-2xl px-4 py-3" style={{ background:'var(--a50)', border:'1px solid var(--a200)' }}>
               <p className="text-xs uppercase tracking-wide mb-0.5" style={{ color:'var(--a500)' }}>You've saved</p>
-              <p className="text-lg font-bold" style={{ color:'var(--a600)' }}><TaxPrice price={totalSavings} variant="total" /></p>
+              <p className="text-lg font-bold" style={{ color:'var(--a600)' }}>
+                {taxEnabled && taxRate > 0 ? fmtFull(scopedSavings * taxMult) : fmt(scopedSavings)}
+              </p>
+              {taxEnabled && taxRate > 0 && (
+                <p className="text-xs mt-0.5" style={{ color:'var(--a400)' }}>{fmt(scopedSavings)} before tax</p>
+              )}
             </div>
           )}
         </div>
