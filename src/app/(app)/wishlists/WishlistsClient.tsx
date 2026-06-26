@@ -427,8 +427,12 @@ function ShareModal({ sharedUrl, sharedTitle, sharedPrice, sharedImage, sharedCu
   onClose: () => void
 }) {
   const router = useRouter()
-  const [colFilter, setColFilter] = useState<string | 'all'>('all')
-  const [selected, setSelected] = useState<string | null>(lists[0]?.id ?? null)
+  const defaultCol = collections.length > 0 ? collections[collections.length - 1].id : 'all'
+  const [colFilter, setColFilter] = useState<string | 'all'>(defaultCol)
+  const [selected, setSelected] = useState<string | null>(() => {
+    const first = lists.find(l => defaultCol === 'all' || (l.collection_id ?? 'none') === defaultCol)
+    return first?.id ?? lists[0]?.id ?? null
+  })
   const [loading, setLoading] = useState(false)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
@@ -453,11 +457,14 @@ function ShareModal({ sharedUrl, sharedTitle, sharedPrice, sharedImage, sharedCu
   // Show all collections so the user can filter and create categories under any master list.
   const usedCollections = collections
   const hasUnsorted = lists.some(l => !l.collection_id)
-  const shownLists = lists.filter(l => colFilter === 'all' || (l.collection_id ?? 'none') === colFilter)
+  const shownLists = lists
+    .filter(l => colFilter === 'all' || (l.collection_id ?? 'none') === colFilter)
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
   const colName = (id: string | null | undefined) => collections.find(c => c.id === id)?.name ?? null
 
   function pickCol(id: string | 'all') {
     setColFilter(id)
+    if (id === 'all') { setCreating(false); setNewName('') }
     const first = lists.find(l => id === 'all' || (l.collection_id ?? 'none') === id)
     setSelected(first?.id ?? null)
   }
@@ -531,8 +538,8 @@ function ShareModal({ sharedUrl, sharedTitle, sharedPrice, sharedImage, sharedCu
               ))}
             </div>
         }
-        {/* New category */}
-        {creating ? (
+        {/* New category — hidden when "All" is selected since we don't know which master list to assign */}
+        {colFilter !== 'all' && (creating ? (
           <div className="mb-4 p-3 rounded-xl border border-line bg-raised">
             <p className="text-xs text-dim mb-1.5">
               New category{targetCol ? <> in <span className="font-medium text-ink">{collections.find(c => c.id === targetCol)?.name}</span></> : ' (Unsorted)'}
@@ -551,7 +558,7 @@ function ShareModal({ sharedUrl, sharedTitle, sharedPrice, sharedImage, sharedCu
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/></svg>
             New category{targetCol ? ` in ${collections.find(c => c.id === targetCol)?.name}` : ''}
           </button>
-        )}
+        ))}
 
         <div className="flex gap-2">
           <button onClick={onClose} className="flex-1 py-2.5 text-sm text-dim hover:text-ink rounded-xl hover:bg-raised spring">Cancel</button>
