@@ -17,6 +17,8 @@ import CollectionSwitcher from '@/components/collections/CollectionSwitcher'
 type Wishlist = { id: string; name: string; description: string | null; created_at: string; emoji: string | null; archived: boolean | null; collection_id?: string | null; sort_order?: number }
 type Collection = { id: string; name: string; emoji: string | null; description: string | null; color: string | null; sort_order: number }
 type ItemSummaryRow = { wishlist_id: string; purchased: boolean | null; auto_price: number | null; target_price: number | null; quantity: number | null }
+// Raw shape produced by the extension's extract-batch.js (one row per cart/wishlist line item).
+type BatchSourceItem = { title: string | null; price: string | null; currency: string; image: string | null; url: string; quantity?: number }
 
 const accentHex = (id: string | null | undefined) => ACCENTS.find(a => a.id === id)?.hex ?? 'var(--a600)'
 const SELECTED_KEY = 'wl-collection'
@@ -50,9 +52,27 @@ export default function WishlistsClient({ initialWishlists, itemSummary, initial
   const [shareModal, setShareModal] = useState<{ url: string; title: string; price?: string; image?: string; currency?: string } | null>(
     shareUrl ? { url: shareUrl, title: shareTitle ?? '', price: sharePrice, image: shareImage, currency: shareCurrency } : null
   )
+  const [batchItems, setBatchItems] = useState<BatchSourceItem[] | null>(null)
 
-  // Clean up the ?share= params from the address bar without triggering a Next.js
-  // navigation (router.replace would re-render the server component and wipe shareModal state)
+  // The extension's batch mode (Amazon cart/wishlist pages) lands here as
+  // #batch=<json> — a URL fragment, so the payload never touches the server
+  // and isn't limited by URL length the way ?share= would be. Because the
+  // server never sees the fragment, it MUST be read after hydration (in an
+  // effect) — reading it during render would make the client's first render
+  // disagree with the server's null render and trip a hydration mismatch.
+  // (Same client-only-state pattern as the localStorage read above.)
+  useEffect(() => {
+    if (!window.location.hash.startsWith('#batch=')) return
+    try {
+      const items = JSON.parse(decodeURIComponent(window.location.hash.slice('#batch='.length)))
+      if (Array.isArray(items) && items.length > 0) setBatchItems(items)
+    } catch { /* malformed payload — ignore */ }
+    window.history.replaceState(null, '', '/wishlists')
+  }, [])
+
+  // Clean up the ?share= param from the address bar without triggering a Next.js
+  // navigation (router.replace would re-render the server component and wipe
+  // shareModal state). The #batch= fragment is cleaned up in the effect above.
   useEffect(() => {
     if (shareUrl) window.history.replaceState(null, '', '/wishlists')
   }, [shareUrl])
@@ -351,6 +371,15 @@ export default function WishlistsClient({ initialWishlists, itemSummary, initial
         />
       )}
 
+      {/* ── Batch review (extension cart/wishlist import) ── */}
+      {batchItems && (
+        <BatchReviewModal
+          items={batchItems}
+          lists={wishlists.filter(w => !w.archived)}
+          onClose={() => setBatchItems(null)}
+        />
+      )}
+
       {/* ── Delete master list confirm ── */}
       {deletingCollection && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -581,6 +610,244 @@ function ShareModal({ sharedUrl, sharedTitle, sharedPrice, sharedImage, sharedCu
             {loading ? 'Adding…' : 'Add item'}
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+/* ─── Batch review modal (extension cart/wishlist import) ─────── */
+type ListOption = { id: string; name: string; emoji: string | null }
+type BatchRow = {
+  title: string
+  url: string
+  image: string | null
+  price: string
+  currency: string
+  quantity: number
+  listId: string
+  include: boolean
+}
+
+function BatchReviewModal({ items, lists, onClose }: {
+  items: BatchSourceItem[]
+  lists: ListOption[]
+  onClose: () => void
+}) {
+  const [availableLists, setAvailableLists] = useState<ListOption[]>(lists)
+  const [rows, setRows] = useState<BatchRow[]>(() => items.map(it => ({
+    title: it.title || it.url,
+    url: it.url,
+    image: it.image,
+    price: it.price ?? '',
+    currency: it.currency || 'USD',
+    quantity: it.quantity && it.quantity > 0 ? it.quantity : 1,
+    listId: lists[0]?.id ?? '',
+    include: true,
+  })))
+  const [selected, setSelected] = useState<Set<number>>(new Set(items.map((_, i) => i)))
+  const [bulkListId, setBulkListId] = useState<string>(lists[0]?.id ?? '')
+  const [creatingList, setCreatingList] = useState(availableLists.length === 0)
+  const [newListName, setNewListName] = useState('')
+  const [creatingLoad, setCreatingLoad] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [done, setDone] = useState<{ added: number; updated: number } | null>(null)
+
+  function updateRow(i: number, patch: Partial<BatchRow>) {
+    setRows(prev => prev.map((r, idx) => idx === i ? { ...r, ...patch } : r))
+  }
+  function toggleAll(on: boolean) {
+    setSelected(on ? new Set(rows.map((_, i) => i)) : new Set())
+  }
+  function toggleOne(i: number) {
+    setSelected(prev => { const next = new Set(prev); next.has(i) ? next.delete(i) : next.add(i); return next })
+  }
+  function applyBulkList() {
+    if (!bulkListId) return
+    setRows(prev => prev.map((r, i) => selected.has(i) ? { ...r, listId: bulkListId } : r))
+  }
+
+  async function createListAndAssign() {
+    if (!newListName.trim()) return
+    setCreatingLoad(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setCreatingLoad(false); return }
+    const { data } = await supabase.from('wishlists')
+      .insert({ name: newListName.trim(), user_id: user.id, emoji: '🛍️' })
+      .select('id, name, emoji').single()
+    setCreatingLoad(false)
+    if (!data) return
+    const created = data as ListOption
+    setAvailableLists(prev => [...prev, created])
+    setBulkListId(created.id)
+    setRows(prev => prev.map((r, i) => (selected.has(i) || !r.listId) ? { ...r, listId: created.id } : r))
+    setNewListName('')
+    setCreatingList(false)
+  }
+
+  async function doImport() {
+    const toImport = rows.filter((r, i) => r.include && selected.has(i) && r.listId && r.title.trim())
+    if (toImport.length === 0) return
+    setImporting(true)
+    const supabase = createClient()
+
+    const targetListIds = [...new Set(toImport.map(r => r.listId))]
+    const { data: existingItems } = await supabase
+      .from('wishlist_items')
+      .select('id, name, wishlist_id')
+      .in('wishlist_id', targetListIds)
+    const existingMap = new Map<string, string>()
+    for (const row of existingItems ?? []) existingMap.set(`${row.wishlist_id}::${row.name.toLowerCase()}`, row.id)
+
+    const prepared = toImport.map(r => {
+      const priceNum = r.price ? parseFloat(r.price) : null
+      const hasPrice = priceNum != null && !isNaN(priceNum)
+      return {
+        listId: r.listId,
+        key: `${r.listId}::${r.title.trim().toLowerCase()}`,
+        patch: {
+          name: r.title.trim(),
+          url: r.url || null,
+          image_url: r.image || null,
+          auto_price: hasPrice ? priceNum : null,
+          auto_currency: hasPrice ? r.currency : null,
+          quantity: r.quantity > 0 ? r.quantity : 1,
+        },
+      }
+    })
+
+    const toInsert = prepared.filter(p => !existingMap.has(p.key))
+    const toUpdate = prepared.filter(p => existingMap.has(p.key)).map(p => ({ id: existingMap.get(p.key)!, patch: p.patch }))
+
+    if (toInsert.length > 0) {
+      await supabase.from('wishlist_items').insert(toInsert.map(p => ({ wishlist_id: p.listId, ...p.patch })))
+    }
+    await Promise.all(toUpdate.map(({ id, patch }) => supabase.from('wishlist_items').update(patch).eq('id', id)))
+
+    setImporting(false)
+    setDone({ added: toInsert.length, updated: toUpdate.length })
+  }
+
+  const selectedCount = selected.size
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4">
+      <div className="bg-card border border-line rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-line shrink-0">
+          <div className="flex items-center gap-3">
+            <span className="text-xl">🛒</span>
+            <div>
+              <h2 className="font-semibold text-ink">Add {items.length} item{items.length !== 1 ? 's' : ''} from cart</h2>
+              <p className="text-xs text-ghost mt-0.5">Pulled straight from the page — review, edit, and pick a list for each.</p>
+            </div>
+          </div>
+          {!done && (
+            <button onClick={onClose} className="p-1.5 rounded-lg text-ghost hover:text-ink hover:bg-raised spring">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          )}
+        </div>
+
+        {done ? (
+          <div className="p-6 text-center py-12">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl text-3xl mb-4" style={{ background: 'var(--a50)' }}>✅</div>
+            <h3 className="text-lg font-semibold text-ink mb-2">Import complete!</h3>
+            <div className="flex items-center justify-center gap-3 mt-2 mb-1">
+              {done.added > 0 && <span className="text-sm px-3 py-1 rounded-full text-[var(--a-on)]" style={{ background: 'var(--a600)' }}>+{done.added} new</span>}
+              {done.updated > 0 && <span className="text-sm px-3 py-1 rounded-full bg-raised text-ink border border-line">↻ {done.updated} updated</span>}
+            </div>
+            <button onClick={() => window.location.reload()} className="mt-6 w-full max-w-xs mx-auto block py-2.5 text-sm rounded-xl spring" style={{ background: 'var(--a600)', color: 'var(--a-on)' }}>
+              Done
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="px-6 py-3 border-b border-line shrink-0 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-dim"><span className="font-medium text-ink">{selectedCount}</span> of {rows.length} selected</p>
+                <div className="flex gap-2">
+                  <button onClick={() => toggleAll(true)} className="text-xs text-dim hover:text-ink spring">Select all</button>
+                  <span className="text-ghost">·</span>
+                  <button onClick={() => toggleAll(false)} className="text-xs text-dim hover:text-ink spring">None</button>
+                </div>
+              </div>
+
+              {/* Bulk list assignment — the efficient path instead of picking per item */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {!creatingList ? (
+                  <>
+                    <select value={bulkListId} onChange={e => setBulkListId(e.target.value)} className={`${INPUT} !py-1.5 !w-auto flex-1 min-w-[9rem]`} style={RING}>
+                      {availableLists.length === 0 && <option value="">No lists yet</option>}
+                      {availableLists.map(l => <option key={l.id} value={l.id}>{l.emoji ?? '🛍️'} {l.name}</option>)}
+                    </select>
+                    <button onClick={applyBulkList} disabled={!bulkListId || selectedCount === 0} className="px-3 py-1.5 rounded-lg text-xs font-medium spring disabled:opacity-40 shrink-0" style={{ background: 'var(--a600)', color: 'var(--a-on)' }}>
+                      Apply to selected
+                    </button>
+                    <button onClick={() => setCreatingList(true)} className="px-3 py-1.5 rounded-lg text-xs font-medium border border-dashed border-line text-dim hover:text-ink spring shrink-0">
+                      + New list
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <input autoFocus value={newListName} onChange={e => setNewListName(e.target.value)} onKeyDown={e => e.key === 'Enter' && createListAndAssign()}
+                      placeholder="New list name…" className={`${INPUT} !py-1.5 flex-1 min-w-[9rem]`} style={RING} />
+                    <button onClick={createListAndAssign} disabled={!newListName.trim() || creatingLoad} className="px-3 py-1.5 rounded-lg text-xs font-medium spring disabled:opacity-40 shrink-0" style={{ background: 'var(--a600)', color: 'var(--a-on)' }}>
+                      {creatingLoad ? '…' : 'Create & assign'}
+                    </button>
+                    {availableLists.length > 0 && (
+                      <button onClick={() => setCreatingList(false)} className="text-xs text-ghost hover:text-dim spring shrink-0">Cancel</button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-1.5">
+              {rows.map((r, i) => (
+                <div key={i} className={`flex items-start gap-2.5 p-2.5 rounded-xl border transition-colors ${selected.has(i) ? '' : 'opacity-50'}`}
+                  style={selected.has(i) ? { background: 'var(--a50)', borderColor: 'var(--a200)' } : { borderColor: 'var(--line)', background: 'var(--raised)' }}>
+                  <input type="checkbox" checked={selected.has(i)} onChange={() => toggleOne(i)} className="mt-2.5 shrink-0 accent-[var(--a600)]" />
+
+                  <div className="w-10 h-10 shrink-0 rounded-lg bg-card border border-line overflow-hidden flex items-center justify-center mt-0.5">
+                    {r.image
+                      // eslint-disable-next-line @next/next/no-img-element
+                      ? <img src={r.image} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                      : <span className="text-ghost text-lg">?</span>}
+                  </div>
+
+                  <div className="flex-1 min-w-0 space-y-1.5">
+                    <input value={r.title} onChange={e => updateRow(i, { title: e.target.value })} placeholder="Item name"
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-line bg-card text-ink text-sm focus:outline-none focus:ring-2 focus:border-transparent" style={RING} />
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="text-xs text-ghost">$</span>
+                        <input value={r.price} onChange={e => updateRow(i, { price: e.target.value })} placeholder="0.00" inputMode="decimal"
+                          className="w-16 px-1.5 py-1 rounded-lg border border-line bg-card text-ink text-xs focus:outline-none focus:ring-2 focus:border-transparent" style={RING} />
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="text-xs text-ghost">×</span>
+                        <input type="number" min={1} value={r.quantity} onChange={e => updateRow(i, { quantity: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+                          className="w-12 px-1.5 py-1 rounded-lg border border-line bg-card text-ink text-xs focus:outline-none focus:ring-2 focus:border-transparent" style={RING} />
+                      </div>
+                      <select value={r.listId} onChange={e => updateRow(i, { listId: e.target.value })}
+                        className="flex-1 min-w-[7rem] px-2 py-1 rounded-lg border border-line bg-card text-ink text-xs focus:outline-none focus:ring-2 focus:border-transparent" style={RING}>
+                        {availableLists.length === 0 && <option value="">No lists yet</option>}
+                        {availableLists.map(l => <option key={l.id} value={l.id}>{l.emoji ?? '🛍️'} {l.name}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="px-6 py-4 border-t border-line flex items-center justify-between shrink-0">
+              <button onClick={onClose} className="px-4 py-2 text-sm text-dim hover:text-ink rounded-lg hover:bg-raised spring">Cancel</button>
+              <button onClick={doImport} disabled={selectedCount === 0 || importing || availableLists.length === 0} className="px-5 py-2 text-sm rounded-xl spring disabled:opacity-40" style={{ background: 'var(--a600)', color: 'var(--a-on)' }}>
+                {importing ? 'Importing…' : `Import ${selectedCount} item${selectedCount !== 1 ? 's' : ''}`}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
