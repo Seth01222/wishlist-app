@@ -33,6 +33,46 @@ function buildBookmarklet(origin: string): string {
   return 'javascript:(function(){' + code + '})();'
 }
 
+// The BATCH bookmarklet is a compact version of extension/extract-batch.js:
+// it walks every row on an Amazon cart / wish-list page and opens the app's
+// batch review screen with all of them (via the #batch fragment the app reads).
+// Desktop-verified selectors — the mobile-Safari cart uses a different DOM and
+// is not covered here. Keep in sync with extension/extract-batch.js.
+function buildBatchBookmarklet(origin: string): string {
+  const code = `
+    var APP=${JSON.stringify(origin)};
+    function cp(r){if(r==null)return null;var m=String(r).replace(/[ ,]/g,'').match(/(\\d+(?:\\.\\d{1,2})?)/);return m?m[1]:null}
+    function ab(u){if(!u)return null;if(u.indexOf('//')===0)return location.protocol+u;if(u.charAt(0)==='/')return location.origin+u;return u}
+    function up(u){return u?u.replace(/\\._[A-Z0-9,_]+_\\.(jpg|png|webp)$/i,'.$1'):u}
+    function tx(r,s){var e=r.querySelector(s);return e?(e.textContent||'').trim():null}
+    function at(r,s,n){var e=r.querySelector(s);return e?e.getAttribute(n):null}
+    var out=[];
+    document.querySelectorAll('#sc-active-cart .sc-list-item, #activeCartViewForm .sc-list-item').forEach(function(row){
+      var title=tx(row,'.sc-product-title .a-truncate-full')||tx(row,'.sc-product-title')||at(row,'img.sc-product-image','alt');
+      var asin=row.getAttribute('data-asin');
+      var url=ab(at(row,'a.sc-product-link','href'))||(asin?location.origin+'/dp/'+asin:null);
+      if(!title&&!url)return;
+      var img=up(ab(at(row,'img.sc-product-image','src')));
+      var q=parseInt(row.getAttribute('data-quantity'),10);if(isNaN(q)||q<1)q=1;
+      out.push({title:title?title.slice(0,300):null,price:cp(row.getAttribute('data-price')),currency:'USD',image:img&&/^https?:\\/\\//.test(img)?img:null,url:url||location.href,quantity:q});
+    });
+    if(out.length===0){
+      document.querySelectorAll('#g-items li[data-itemid], li[data-id][data-itemid]').forEach(function(row){
+        var nl=row.querySelector('a[id^="itemName_"]');var title=nl?(nl.textContent||'').trim():null;var url=ab(nl?nl.getAttribute('href'):null);
+        if(!title&&!url)return;
+        var im=row.querySelector('img[id^="itemImage_"]')||row.querySelector('img[src*="/images/I/"]');
+        var img=up(ab(im?(im.getAttribute('data-old-hires')||im.getAttribute('src')):null));
+        var pe=row.querySelector('[id^="itemPrice_"] .a-offscreen, span[id^="itemPrice_"]');
+        var qe=row.querySelector('[id^="itemQuantityDesired_"], [id^="itemRequestedQuantity_"]');var q=1;if(qe){var n=parseInt((qe.textContent||qe.value||'').replace(/\\D/g,''),10);if(!isNaN(n)&&n>0)q=n}
+        out.push({title:title?title.slice(0,300):null,price:cp(pe?pe.textContent:null),currency:'USD',image:img&&/^https?:\\/\\//.test(img)?img:null,url:url||location.href,quantity:q});
+      });
+    }
+    if(out.length===0){alert('No cart or wish-list items found on this page. Open your Amazon cart or a wish list first.');return}
+    window.open(APP+'/wishlists#batch='+encodeURIComponent(JSON.stringify(out)),'_blank');
+  `.replace(/\s*\n\s*/g, '')
+  return 'javascript:(function(){' + code + '})();'
+}
+
 const CARD = 'bg-card border border-line rounded-2xl p-6'
 const STEP = 'flex gap-3'
 
@@ -40,7 +80,9 @@ export default function ToolsPage() {
   const router = useRouter()
   const [origin, setOrigin] = useState('')
   const [copied, setCopied] = useState(false)
+  const [copiedBatch, setCopiedBatch] = useState(false)
   const linkRef = useRef<HTMLAnchorElement>(null)
+  const batchLinkRef = useRef<HTMLAnchorElement>(null)
 
   // SerpApi key + search state
   const [keyInput, setKeyInput] = useState('')
@@ -57,6 +99,7 @@ export default function ToolsPage() {
     // Set the javascript: href directly on the DOM node — React strips
     // javascript: URLs from the href attribute, which would break dragging.
     if (linkRef.current) linkRef.current.href = buildBookmarklet(o)
+    if (batchLinkRef.current) batchLinkRef.current.href = buildBatchBookmarklet(o)
 
     // Reflect whether a SerpApi key is already saved.
     ;(async () => {
@@ -72,6 +115,12 @@ export default function ToolsPage() {
     await navigator.clipboard.writeText(buildBookmarklet(origin))
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  async function copyBatchBookmarklet() {
+    await navigator.clipboard.writeText(buildBatchBookmarklet(origin))
+    setCopiedBatch(true)
+    setTimeout(() => setCopiedBatch(false), 2000)
   }
 
   async function saveKey() {
@@ -221,6 +270,46 @@ export default function ToolsPage() {
             <li>Name it &ldquo;Add to Wishlist&rdquo; and save.</li>
           </ol>
         </details>
+
+        {/* Batch bookmarklet — whole Amazon cart / wish list at once */}
+        <div className="mt-5 pt-5 border-t border-line">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-base">🛒</span>
+            <h3 className="font-semibold text-ink">Add a whole Amazon cart at once</h3>
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-raised text-ghost border border-line">desktop</span>
+          </div>
+          <p className="text-dim text-sm mb-4">
+            A second bookmarklet. Drag it to your bookmarks bar, then click it while you&apos;re on your
+            {' '}<span className="text-ink">Amazon cart</span> or an <span className="text-ink">Amazon wish list</span> — it
+            pulls <span className="text-ink">every item on the page</span> and opens a review screen where you can
+            edit each one and choose which list it lands in.
+          </p>
+
+          <div className="flex flex-wrap items-center gap-3 mb-3">
+            {/* eslint-disable-next-line @next/next/no-invalid-href -- href set via ref */}
+            <a
+              ref={batchLinkRef}
+              href="#"
+              onClick={e => e.preventDefault()}
+              draggable
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm cursor-grab select-none"
+              style={{ background: 'var(--a600)', color: 'var(--a-on)' }}
+            >
+              🛒 Add Cart to Wishlist
+            </a>
+            <button
+              onClick={copyBatchBookmarklet}
+              className="px-3.5 py-2.5 rounded-xl text-sm font-medium bg-raised border border-line text-dim hover:text-ink spring"
+            >
+              {copiedBatch ? 'Copied ✓' : 'Copy code'}
+            </button>
+          </div>
+
+          <p className="text-xs text-ghost">
+            Make sure you&apos;re signed into Amazon and this app in the same browser. Works on a Mac/desktop
+            browser — the iPhone Amazon cart uses a different layout that isn&apos;t supported yet.
+          </p>
+        </div>
       </div>
 
       {/* Extension */}
@@ -238,12 +327,11 @@ export default function ToolsPage() {
           <li className={STEP}><span className="font-semibold text-ink">4.</span> Click the button on any product page.</li>
         </ol>
 
-        {/* Batch mode — extension only */}
+        {/* Batch mode */}
         <div className="mt-4 rounded-xl border p-4" style={{ background: 'var(--a50)', borderColor: 'var(--a200)' }}>
           <div className="flex items-center gap-2 mb-1.5">
             <span className="text-lg">🛒</span>
             <h3 className="font-semibold" style={{ color: 'var(--a700)' }}>Batch add a whole cart at once</h3>
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full text-[var(--a-on)]" style={{ background: 'var(--a600)' }}>extension only</span>
           </div>
           <p className="text-sm mb-3" style={{ color: 'var(--a700)' }}>
             Click the toolbar button while you&apos;re on your <span className="font-medium">Amazon cart</span> or
@@ -257,7 +345,8 @@ export default function ToolsPage() {
             <li className={STEP}><span className="font-semibold">•</span> On a normal product page the button still adds just that one item — batch mode kicks in automatically on cart/list pages.</li>
           </ul>
           <p className="text-xs mt-3" style={{ color: 'var(--a600)' }}>
-            The bookmarklet can&apos;t do this — a full cart doesn&apos;t fit in a bookmark. Batch mode needs the extension.
+            Prefer no install? The <span className="font-medium">🛒 Add Cart to Wishlist</span> bookmarklet above does the
+            same thing on a desktop browser.
           </p>
         </div>
       </div>

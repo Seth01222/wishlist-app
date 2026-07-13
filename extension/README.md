@@ -60,6 +60,9 @@ use.
 generates a bookmarklet from the same logic — if you improve one, update the
 other.
 
-`extract-batch.js` is extension-only — there's no bookmarklet equivalent,
-since a cart's worth of items doesn't fit in a `javascript:` URL the way one
-product does. Batch mode only works through this extension.
+`extract-batch.js` also has a bookmarklet twin, generated on the app's **Quick
+Add** page (`buildBatchBookmarklet`). It runs the same cart/wish-list walk and
+hands the items to the app via the `#batch=` URL fragment (a full cart fits
+fine there). If you change the selectors here, update that generator too. The
+bookmarklet uses the desktop selectors only; the mobile-Safari cart has a
+different DOM and isn't covered by either.
