@@ -625,7 +625,6 @@ type BatchRow = {
   currency: string
   quantity: number
   listId: string
-  include: boolean
 }
 
 function BatchReviewModal({ items, lists, onClose }: {
@@ -642,9 +641,11 @@ function BatchReviewModal({ items, lists, onClose }: {
     currency: it.currency || 'USD',
     quantity: it.quantity && it.quantity > 0 ? it.quantity : 1,
     listId: lists[0]?.id ?? '',
-    include: true,
   })))
   const [selected, setSelected] = useState<Set<number>>(new Set(items.map((_, i) => i)))
+  // Rows the user has skipped: hidden from the review and excluded from import,
+  // but kept in `rows` (by index) so "undo" can bring them back.
+  const [skipped, setSkipped] = useState<Set<number>>(new Set())
   const [bulkListId, setBulkListId] = useState<string>(lists[0]?.id ?? '')
   const [creatingList, setCreatingList] = useState(availableLists.length === 0)
   const [newListName, setNewListName] = useState('')
@@ -656,10 +657,19 @@ function BatchReviewModal({ items, lists, onClose }: {
     setRows(prev => prev.map((r, idx) => idx === i ? { ...r, ...patch } : r))
   }
   function toggleAll(on: boolean) {
-    setSelected(on ? new Set(rows.map((_, i) => i)) : new Set())
+    // Only affects rows that are still visible (not skipped).
+    setSelected(on ? new Set(rows.map((_, i) => i).filter(i => !skipped.has(i))) : new Set())
   }
   function toggleOne(i: number) {
     setSelected(prev => { const next = new Set(prev); next.has(i) ? next.delete(i) : next.add(i); return next })
+  }
+  function skipOne(i: number) {
+    setSkipped(prev => new Set(prev).add(i))
+    setSelected(prev => { const next = new Set(prev); next.delete(i); return next })
+  }
+  function unskipAll() {
+    setSelected(prev => { const next = new Set(prev); skipped.forEach(i => next.add(i)); return next })
+    setSkipped(new Set())
   }
   function applyBulkList() {
     if (!bulkListId) return
@@ -686,7 +696,7 @@ function BatchReviewModal({ items, lists, onClose }: {
   }
 
   async function doImport() {
-    const toImport = rows.filter((r, i) => r.include && selected.has(i) && r.listId && r.title.trim())
+    const toImport = rows.filter((r, i) => !skipped.has(i) && selected.has(i) && r.listId && r.title.trim())
     if (toImport.length === 0) return
     setImporting(true)
     const supabase = createClient()
@@ -764,7 +774,12 @@ function BatchReviewModal({ items, lists, onClose }: {
           <>
             <div className="px-6 py-3 border-b border-line shrink-0 space-y-2.5">
               <div className="flex items-center justify-between">
-                <p className="text-sm text-dim"><span className="font-medium text-ink">{selectedCount}</span> of {rows.length} selected</p>
+                <p className="text-sm text-dim">
+                  <span className="font-medium text-ink">{selectedCount}</span> of {rows.length - skipped.size} selected
+                  {skipped.size > 0 && (
+                    <span className="text-ghost"> · {skipped.size} skipped <button onClick={unskipAll} className="underline hover:text-ink spring" style={{ color: 'var(--a500)' }}>undo</button></span>
+                  )}
+                </p>
                 <div className="flex gap-2">
                   <button onClick={() => toggleAll(true)} className="text-xs text-dim hover:text-ink spring">Select all</button>
                   <span className="text-ghost">·</span>
@@ -803,7 +818,7 @@ function BatchReviewModal({ items, lists, onClose }: {
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-1.5">
-              {rows.map((r, i) => (
+              {rows.map((r, i) => skipped.has(i) ? null : (
                 <div key={i} className={`flex items-start gap-2.5 p-2.5 rounded-xl border transition-colors ${selected.has(i) ? '' : 'opacity-50'}`}
                   style={selected.has(i) ? { background: 'var(--a50)', borderColor: 'var(--a200)' } : { borderColor: 'var(--line)', background: 'var(--raised)' }}>
                   <input type="checkbox" checked={selected.has(i)} onChange={() => toggleOne(i)} className="mt-2.5 shrink-0 accent-[var(--a600)]" />
@@ -836,8 +851,22 @@ function BatchReviewModal({ items, lists, onClose }: {
                       </select>
                     </div>
                   </div>
+
+                  {/* Skip — drop this pulled item from the review entirely */}
+                  <button onClick={() => skipOne(i)} title="Skip this item"
+                    className="shrink-0 flex items-center gap-1 px-2 py-1 mt-0.5 rounded-lg text-xs text-ghost hover:text-red-400 hover:bg-red-500/10 spring">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
+                    <span className="hidden sm:inline">Skip</span>
+                  </button>
                 </div>
               ))}
+
+              {rows.length - skipped.size === 0 && (
+                <div className="text-center py-10 text-sm text-dim">
+                  All items skipped.{' '}
+                  <button onClick={unskipAll} className="underline hover:text-ink spring" style={{ color: 'var(--a500)' }}>Undo</button>
+                </div>
+              )}
             </div>
 
             <div className="px-6 py-4 border-t border-line flex items-center justify-between shrink-0">
