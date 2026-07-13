@@ -30,6 +30,23 @@ image just like you do, and there's no bot detection to beat.
 2. Click the toolbar button. A tab opens with the item pre-filled — pick a list
    and confirm.
 
+## Batch mode (Amazon cart / wishlist pages)
+
+If you click the toolbar button on your **Amazon cart** (`/gp/cart/view.html`)
+or an **Amazon wish list** (`/hz/wishlist/ls/...`), it automatically switches
+modes: instead of extracting one product, `extract-batch.js` walks every line
+item on the page and grabs all of them at once. A tab opens on a review
+screen where you can edit each item's name/price/quantity, bulk-assign a
+list to a whole selection (or create a new list on the spot) instead of
+confirming one item at a time, then import everything together.
+
+This only recognizes Amazon's cart/wishlist markup today — other sites'
+carts would need their own row selectors added to `extract-batch.js` (and a
+matching URL pattern in `background.js`'s `BATCH_PAGE_PATTERNS`). Unlike the
+single-product extractor, there's no universal standard for "everything in
+this cart," so Amazon changing their markup is the most likely thing to break
+this — check `extract-batch.js` first if batch mode stops finding items.
+
 ## Publishing to the Chrome Web Store (optional)
 
 Zip this folder and upload it at the
@@ -42,3 +59,7 @@ use.
 `extract.js` is the canonical product extractor. The app's **Quick Add** page
 generates a bookmarklet from the same logic — if you improve one, update the
 other.
+
+`extract-batch.js` is extension-only — there's no bookmarklet equivalent,
+since a cart's worth of items doesn't fit in a `javascript:` URL the way one
+product does. Batch mode only works through this extension.
