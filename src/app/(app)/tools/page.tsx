@@ -228,7 +228,8 @@ export default function ToolsPage() {
         <h2 className="font-semibold text-ink mb-1">🧩 Browser extension (toolbar button)</h2>
         <p className="text-dim text-sm mb-3">
           A proper toolbar button for Chrome, Edge, or Brave. Same idea as the
-          bookmarklet, with a nicer click target.
+          bookmarklet, with a nicer click target — plus it can add a whole
+          Amazon cart at once (see below).
         </p>
         <ol className="text-sm text-dim space-y-2">
           <li className={STEP}><span className="font-semibold text-ink">1.</span> Download the <code className="text-ink">extension/</code> folder from the project repo.</li>
@@ -236,6 +237,29 @@ export default function ToolsPage() {
           <li className={STEP}><span className="font-semibold text-ink">3.</span> Open the extension&apos;s options and set the App URL to <code className="text-ink break-all">{origin || 'this site'}</code>.</li>
           <li className={STEP}><span className="font-semibold text-ink">4.</span> Click the button on any product page.</li>
         </ol>
+
+        {/* Batch mode — extension only */}
+        <div className="mt-4 rounded-xl border p-4" style={{ background: 'var(--a50)', borderColor: 'var(--a200)' }}>
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="text-lg">🛒</span>
+            <h3 className="font-semibold" style={{ color: 'var(--a700)' }}>Batch add a whole cart at once</h3>
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full text-[var(--a-on)]" style={{ background: 'var(--a600)' }}>extension only</span>
+          </div>
+          <p className="text-sm mb-3" style={{ color: 'var(--a700)' }}>
+            Click the toolbar button while you&apos;re on your <span className="font-medium">Amazon cart</span> or
+            an <span className="font-medium">Amazon wish list</span> and it grabs <span className="font-medium">every item on the page</span> — name,
+            price, image, and quantity — instead of just one. A review screen opens where you can edit each item,
+            bulk-assign a whole selection to one list (or make a new list on the spot), and import them together.
+          </p>
+          <ul className="text-sm space-y-1" style={{ color: 'var(--a700)' }}>
+            <li className={STEP}><span className="font-semibold">•</span> Works on <code className="text-ink">amazon.com/gp/cart/view.html</code> and <code className="text-ink">amazon.com/hz/wishlist/ls/…</code></li>
+            <li className={STEP}><span className="font-semibold">•</span> Make sure you&apos;re signed into Amazon <span className="font-medium">and</span> this app in the same browser.</li>
+            <li className={STEP}><span className="font-semibold">•</span> On a normal product page the button still adds just that one item — batch mode kicks in automatically on cart/list pages.</li>
+          </ul>
+          <p className="text-xs mt-3" style={{ color: 'var(--a600)' }}>
+            The bookmarklet can&apos;t do this — a full cart doesn&apos;t fit in a bookmark. Batch mode needs the extension.
+          </p>
+        </div>
       </div>
 
       {/* iOS */}
